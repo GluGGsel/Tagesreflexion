@@ -1,0 +1,17 @@
+[Unit]
+Description=Tagesreflexion (Next.js)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/tagesreflexion
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=DATA_DIR=/opt/tagesreflexion/data
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target
