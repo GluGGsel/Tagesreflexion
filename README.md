@@ -48,7 +48,7 @@ Der Installer installiert Node.js (20 LTS), Dependencies, baut die App und richt
 
 **Variante A (empfohlen): Repo-URL per ENV setzen**
 ```bash
-sudo REPO_URL="https://github.com/<DEIN_GITHUB_USER>/Tagesreflexion.git" bash scripts/installer.sh
+sudo REPO_URL="https://github.com/GluGGsel/Tagesreflexion.git" bash scripts/installer.sh
 ```
 
 **Variante B: Repo-URL direkt in `scripts/installer.sh` eintragen**
