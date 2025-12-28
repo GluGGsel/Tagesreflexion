@@ -67,13 +67,13 @@ export default function ReflectionPage({ role }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
-  // 60s polling: update partner + talk; do not overwrite my typing if dirty
+  // 300s polling: update partner + talk; do not overwrite my typing if dirty
   useEffect(() => {
     const t = setInterval(() => {
       loadState({ allowOverwriteMyDraft: !dirty }).catch(() => {
         setStatusMsg({ kind: "err", text: "Auto-Update fehlgeschlagen." });
       });
-    }, 60_000);
+    }, 300_000);
     return () => clearInterval(t);
   }, [dirty, role]);
 
