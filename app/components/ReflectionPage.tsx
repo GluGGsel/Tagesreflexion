@@ -169,6 +169,7 @@ export default function ReflectionPage({ role }: Props) {
     }
 
     setDraft((d) => ({ ...d, talk_input: "" }));
+    setDirty(true); // talk input changed
     setStatusMsg({ kind: "ok", text: "Punkt hinzugefügt." });
     await loadState({ allowOverwriteMyDraft: false });
   }
@@ -274,6 +275,17 @@ export default function ReflectionPage({ role }: Props) {
               }}
             />
 
+            {/* Speichern: direkt nach Feld 4, vor Talk-Input */}
+            <div className="row" style={{ marginTop: 10 }}>
+              <button className="btn" onClick={saveMine} disabled={!requiredOk} type="button">
+                Speichern
+              </button>
+              {!requiredOk && <span className="badge err">Pflichtfelder 1–4 müssen ausgefüllt sein.</span>}
+              {dirty && <span className="badge">Ungespeichert</span>}
+            </div>
+
+            <hr className="sep" />
+
             <div className="section-title">Darüber will ich noch reden</div>
             <label className="label">Feld 5 (optional → „To talk about“)</label>
             <textarea
@@ -285,15 +297,10 @@ export default function ReflectionPage({ role }: Props) {
             />
 
             <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn" onClick={saveMine} disabled={!requiredOk} type="button">
-                Speichern
-              </button>
               <button className="btn" onClick={addTalkItem} disabled={!canAddTalk} type="button">
                 Zu „To talk about“ hinzufügen
               </button>
-
-              {!requiredOk && <span className="badge err">Pflichtfelder 1–4 müssen ausgefüllt sein.</span>}
-              {dirty && <span className="badge">Ungespeichert</span>}
+              {!canAddTalk && <span className="badge">Text eingeben, dann hinzufügen.</span>}
             </div>
           </section>
 
