@@ -24,6 +24,31 @@ const EMPTY: Draft = {
   talk_input: ""
 };
 
+type ThemeMode = "light" | "dark";
+
+function getInitialTheme(): ThemeMode | null {
+  if (typeof window === "undefined") return null;
+  const saved = window.localStorage.getItem("theme");
+  if (saved === "light" || saved === "dark") return saved;
+  return null;
+}
+
+function applyTheme(mode: ThemeMode) {
+  document.documentElement.setAttribute("data-theme", mode);
+  window.localStorage.setItem("theme", mode);
+}
+
+function setPageBackdrop(role: Role) {
+  // Farbenfroher “Backdrop” je Rolle, wirkt in light und dark gut.
+  const bg =
+    role === "mann"
+      ? "linear-gradient(135deg, rgba(59,130,246,0.55), rgba(37,99,235,0.40), rgba(2,132,199,0.30))"
+      : "linear-gradient(135deg, rgba(236,72,153,0.55), rgba(244,114,182,0.38), rgba(168,85,247,0.28))";
+
+  document.body.style.background = bg;
+  document.documentElement.style.setProperty("--page-bg", bg);
+}
+
 export default function ReflectionPage({ role }: Props) {
   const otherRole: Role = role === "mann" ? "frau" : "mann";
 
@@ -31,11 +56,34 @@ export default function ReflectionPage({ role }: Props) {
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [dirty, setDirty] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
+  const [theme, setTheme] = useState<ThemeMode | null>(null);
 
   const lastSyncRef = useRef<number>(0);
 
   const partnerLabel = useMemo(() => (role === "mann" ? "Frau" : "Mann"), [role]);
   const meLabel = useMemo(() => (role === "mann" ? "Mann" : "Frau"), [role]);
+
+  // Apply role-specific backdrop
+  useEffect(() => {
+    setPageBackdrop(role);
+  }, [role]);
+
+  // Theme init (prefers-color-scheme unless user set override)
+  useEffect(() => {
+    const saved = getInitialTheme();
+    if (saved) {
+      setTheme(saved);
+      applyTheme(saved);
+      return;
+    }
+    // No saved theme -> do nothing; CSS prefers-color-scheme handles default.
+    // But we keep state so the toggle label is stable:
+    const prefersDark =
+      typeof window !== "undefined" &&
+      window.matchMedia &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches;
+    setTheme(prefersDark ? "dark" : "light");
+  }, []);
 
   async function loadState({ allowOverwriteMyDraft }: { allowOverwriteMyDraft: boolean }) {
     const res = await fetch("/api/state", { cache: "no-store" });
@@ -67,7 +115,7 @@ export default function ReflectionPage({ role }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
-  // 300s polling: update partner + talk; do not overwrite my typing if dirty
+  // Polling: 5 Minuten (wie zuletzt bei dir gewünscht)
   useEffect(() => {
     const t = setInterval(() => {
       loadState({ allowOverwriteMyDraft: !dirty }).catch(() => {
@@ -152,136 +200,151 @@ export default function ReflectionPage({ role }: Props) {
 
   const canNextDay = !!state?.can_next_day;
 
-  return (
-    <main className="container">
-      <div className="header">
-        <h1 className="title">Tagesreflexion</h1>
-        <p className="date">{dayDate}</p>
+  function toggleTheme() {
+    const next: ThemeMode = (theme ?? "light") === "dark" ? "light" : "dark";
+    setTheme(next);
+    applyTheme(next);
+  }
 
-        <div className="footerbar">
-          <div className="row">
-            <a className="btn" href={role === "mann" ? "/frau" : "/mann"} style={{ textDecoration: "none" }}>
-              Zur Seite {partnerLabel}
-            </a>
+  return (
+    <div className="page">
+      <main className="container">
+        <div className="header">
+          <div className="header-top">
+            <div>
+              <h1 className="title">Tagesreflexion</h1>
+              <p className="date">{dayDate}</p>
+            </div>
+
+            <div className="row">
+              <button className="btn secondary" onClick={toggleTheme} type="button">
+                {theme === "dark" ? "Hellmodus" : "Nachtmodus"}
+              </button>
+
+              <button className="btn" onClick={nextDay} disabled={!canNextDay} type="button">
+                Nächster Tag
+              </button>
+            </div>
+          </div>
+
+          <div className="footerbar">
             <span className={`badge ${statusMsg?.kind === "ok" ? "ok" : statusMsg?.kind === "err" ? "err" : ""}`}>
               {statusMsg?.text ?? ""}
             </span>
-          </div>
 
-          <button className="btn" onClick={nextDay} disabled={!canNextDay}>
-            Nächster Tag
-          </button>
+            {!canNextDay && (
+              <span className="badge err">
+                „Nächster Tag“ wird aktiv, sobald beide Pflichtfelder (1–4) ausgefüllt haben.
+              </span>
+            )}
+          </div>
         </div>
 
-        {!canNextDay && (
-          <p className="small">
-            „Nächster Tag“ wird aktiv, sobald beide die Pflichtfelder (1–4) ausgefüllt haben. Ja, Regeln. Brutal.
-          </p>
-        )}
-      </div>
+        <div className="grid">
+          <section className="card">
+            <h2>Meine Einträge ({meLabel})</h2>
 
-      <div className="grid">
-        <section className="card">
-          <h2>Meine Einträge ({meLabel})</h2>
+            <div className="section-title">Ich bin dankbar für</div>
+            <label className="label">Feld 1 (Pflicht)</label>
+            <textarea
+              value={draft.general_1}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, general_1: e.target.value }));
+                setDirty(true);
+              }}
+            />
 
-          <div className="section-title">Ich bin dankbar für</div>
-          <label className="label">Feld 1 (Pflicht)</label>
-          <textarea
-            value={draft.general_1}
-            onChange={(e) => {
-              setDraft((d) => ({ ...d, general_1: e.target.value }));
-              setDirty(true);
-            }}
-          />
+            <label className="label">Feld 2 (Pflicht)</label>
+            <textarea
+              value={draft.general_2}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, general_2: e.target.value }));
+                setDirty(true);
+              }}
+            />
 
-          <label className="label">Feld 2 (Pflicht)</label>
-          <textarea
-            value={draft.general_2}
-            onChange={(e) => {
-              setDraft((d) => ({ ...d, general_2: e.target.value }));
-              setDirty(true);
-            }}
-          />
+            <div className="section-title">Betreffend {partnerLabel} bin ich dankbar für</div>
+            <label className="label">Feld 3 (Pflicht)</label>
+            <textarea
+              value={draft.partner_specific}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, partner_specific: e.target.value }));
+                setDirty(true);
+              }}
+            />
 
-          <div className="section-title">Betreffend {partnerLabel} bin ich dankbar für</div>
-          <label className="label">Feld 3 (Pflicht)</label>
-          <textarea
-            value={draft.partner_specific}
-            onChange={(e) => {
-              setDraft((d) => ({ ...d, partner_specific: e.target.value }));
-              setDirty(true);
-            }}
-          />
+            <div className="section-title">Betreffend Kinder bin ich dankbar</div>
+            <label className="label">Feld 4 (Pflicht)</label>
+            <textarea
+              value={draft.children_gratitude}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, children_gratitude: e.target.value }));
+                setDirty(true);
+              }}
+            />
 
-          <div className="section-title">Betreffend Kinder bin ich dankbar</div>
-          <label className="label">Feld 4 (Pflicht)</label>
-          <textarea
-            value={draft.children_gratitude}
-            onChange={(e) => {
-              setDraft((d) => ({ ...d, children_gratitude: e.target.value }));
-              setDirty(true);
-            }}
-          />
+            <div className="section-title">Darüber will ich noch reden</div>
+            <label className="label">Feld 5 (optional → „To talk about“)</label>
+            <textarea
+              value={draft.talk_input}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, talk_input: e.target.value }));
+                setDirty(true);
+              }}
+            />
 
-          <div className="section-title">Darüber will ich noch reden</div>
-          <label className="label">Feld 5 (optional → „To talk about“)</label>
-          <textarea
-            value={draft.talk_input}
-            onChange={(e) => {
-              setDraft((d) => ({ ...d, talk_input: e.target.value }));
-              setDirty(true);
-            }}
-          />
+            <div className="row" style={{ marginTop: 10 }}>
+              <button className="btn" onClick={saveMine} disabled={!requiredOk} type="button">
+                Speichern
+              </button>
+              <button className="btn" onClick={addTalkItem} disabled={!canAddTalk} type="button">
+                Zu „To talk about“ hinzufügen
+              </button>
 
-          <div className="row" style={{ marginTop: 10 }}>
-            <button className="btn" onClick={saveMine} disabled={!requiredOk}>
-              Speichern
-            </button>
-            <button className="btn" onClick={addTalkItem} disabled={!canAddTalk}>
-              Zu „To talk about“ hinzufügen
-            </button>
-            {!requiredOk && <span className="badge err">Pflichtfelder 1–4 müssen ausgefüllt sein.</span>}
-            {dirty && <span className="badge">Ungespeichert</span>}
-          </div>
+              {!requiredOk && <span className="badge err">Pflichtfelder 1–4 müssen ausgefüllt sein.</span>}
+              {dirty && <span className="badge">Ungespeichert</span>}
+            </div>
+          </section>
 
-          <hr className="sep" />
+          <section className="card">
+            <h2>Einträge von {partnerLabel}</h2>
 
-          <TalkList
-            role={role}
-            talk={state?.talk ?? []}
-            onChanged={async () => loadState({ allowOverwriteMyDraft: false })}
-          />
-        </section>
+            <div className="section-title">Ich bin dankbar für</div>
+            <label className="label">Feld 1</label>
+            <div className="readonly">{otherEntry?.general_1 ?? ""}</div>
 
-        <section className="card">
-          <h2>Einträge von {partnerLabel}</h2>
+            <label className="label">Feld 2</label>
+            <div className="readonly">{otherEntry?.general_2 ?? ""}</div>
 
-          <div className="section-title">Ich bin dankbar für</div>
-          <label className="label">Feld 1</label>
-          <div className="readonly">{otherEntry?.general_1 ?? ""}</div>
+            <div className="section-title">Betreffend {meLabel} bin ich dankbar für</div>
+            <label className="label">Feld 3</label>
+            <div className="readonly">{otherEntry?.partner_specific ?? ""}</div>
 
-          <label className="label">Feld 2</label>
-          <div className="readonly">{otherEntry?.general_2 ?? ""}</div>
+            <div className="section-title">Betreffend Kinder bin ich dankbar</div>
+            <label className="label">Feld 4</label>
+            <div className="readonly">{otherEntry?.children_gratitude ?? ""}</div>
 
-          <div className="section-title">Betreffend {meLabel} bin ich dankbar für</div>
-          <label className="label">Feld 3</label>
-          <div className="readonly">{otherEntry?.partner_specific ?? ""}</div>
+            <div className="section-title">Darüber will ich noch reden</div>
+            <p className="small">
+              Diese Punkte stehen direkt darunter unter „To talk about“ – gemeinsam, abhakbar, ohne Interpretationsspielraum.
+            </p>
 
-          <div className="section-title">Betreffend Kinder bin ich dankbar</div>
-          <label className="label">Feld 4</label>
-          <div className="readonly">{otherEntry?.children_gratitude ?? ""}</div>
+            <p className="small" style={{ marginTop: 10 }}>
+              Zuletzt aktualisiert:{" "}
+              {meEntry?.updated_at ? new Date(meEntry.updated_at).toLocaleString("de-DE") : "—"}
+            </p>
 
-          <div className="section-title">Darüber will ich noch reden</div>
-          <p className="small">
-            Diese Punkte stehen unten unter „To talk about“ – gemeinsam, abhakbar, ohne Interpretationsspielraum.
-          </p>
+            <hr className="sep" />
 
-          <p className="small" style={{ marginTop: 10 }}>
-            Zuletzt aktualisiert:{" "}
-            {meEntry?.updated_at ? new Date(meEntry.updated_at).toLocaleString("de-DE") : "—"}
-          </p>
-        </section>
-      </div>
-    </main>
+            {/* Moved here: To talk about under partner view */}
+            <TalkList
+              role={role}
+              talk={state?.talk ?? []}
+              onChanged={async () => loadState({ allowOverwriteMyDraft: false })}
+            />
+          </section>
+        </div>
+      </main>
+    </div>
   );
 }
