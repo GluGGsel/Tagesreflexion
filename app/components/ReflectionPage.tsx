@@ -73,7 +73,6 @@ export default function ReflectionPage({ role }: Props) {
     }
     const prefersDark =
       typeof window !== "undefined" &&
-      window.matchMedia &&
       window.matchMedia("(prefers-color-scheme: dark)").matches;
     setTheme(prefersDark ? "dark" : "light");
   }, []);
@@ -87,40 +86,35 @@ export default function ReflectionPage({ role }: Props) {
 
     if (allowOverwriteMyDraft) {
       const me = data.entries[role];
-      setDraft((prev) => ({
-        ...prev,
+      setDraft({
+        ...draft,
         general_1: me?.general_1 ?? "",
         general_2: me?.general_2 ?? "",
         partner_specific: me?.partner_specific ?? "",
         children_gratitude: me?.children_gratitude ?? ""
-      }));
+      });
       setDirty(false);
     }
   }
 
   useEffect(() => {
-    loadState({ allowOverwriteMyDraft: true }).catch(() => {
-      setStatusMsg({ kind: "err", text: "Konnte Daten nicht laden." });
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadState({ allowOverwriteMyDraft: true }).catch(() =>
+      setStatusMsg({ kind: "err", text: "Konnte Daten nicht laden." })
+    );
   }, [role]);
 
-  // Polling: 5 Minuten
   useEffect(() => {
     const t = setInterval(() => {
-      loadState({ allowOverwriteMyDraft: !dirty }).catch(() => {
-        setStatusMsg({ kind: "err", text: "Auto-Update fehlgeschlagen." });
-      });
+      loadState({ allowOverwriteMyDraft: !dirty }).catch(() =>
+        setStatusMsg({ kind: "err", text: "Auto-Update fehlgeschlagen." })
+      );
     }, 300_000);
     return () => clearInterval(t);
   }, [dirty, role]);
 
   const dayDate = state?.day?.date ? formatGermanDate(state.day.date) : "";
 
-  const meEntry = state?.entries?.[role] ?? null;
   const otherEntry = state?.entries?.[otherRole] ?? null;
-
-  const canAddTalk = normalizeText(draft.talk_input).length > 0;
 
   const requiredOk = validateRequired4({
     general_1: draft.general_1,
@@ -130,208 +124,93 @@ export default function ReflectionPage({ role }: Props) {
   });
 
   async function saveMine() {
-    setStatusMsg({ kind: "info", text: "Speichern…" });
-    const payload = {
-      general_1: draft.general_1,
-      general_2: draft.general_2,
-      partner_specific: draft.partner_specific,
-      children_gratitude: draft.children_gratitude
-    };
-
-    const res = await fetch(`/api/entries/${role}`, {
+    await fetch(`/api/entries/${role}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        general_1: draft.general_1,
+        general_2: draft.general_2,
+        partner_specific: draft.partner_specific,
+        children_gratitude: draft.children_gratitude
+      })
     });
-
-    if (!res.ok) {
-      setStatusMsg({ kind: "err", text: "Speichern fehlgeschlagen." });
-      return;
-    }
     setStatusMsg({ kind: "ok", text: "Gespeichert." });
-    await loadState({ allowOverwriteMyDraft: true });
-  }
-
-  async function addTalkItem() {
-    const text = normalizeText(draft.talk_input);
-    if (!text) return;
-
-    setStatusMsg({ kind: "info", text: "Punkt hinzufügen…" });
-    const res = await fetch("/api/talk", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, created_by: role })
-    });
-
-    if (!res.ok) {
-      setStatusMsg({ kind: "err", text: "Konnte Punkt nicht hinzufügen." });
-      return;
-    }
-
-    setDraft((d) => ({ ...d, talk_input: "" }));
-    setDirty(true);
-    setStatusMsg({ kind: "ok", text: "Punkt hinzugefügt." });
-    await loadState({ allowOverwriteMyDraft: false });
-  }
-
-  async function nextDay() {
-    setStatusMsg({ kind: "info", text: "Wechsle Tag…" });
-    const res = await fetch("/api/day/next", { method: "POST" });
-    if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      setStatusMsg({ kind: "err", text: t || "Nächster Tag nicht möglich." });
-      return;
-    }
-
-    setStatusMsg({ kind: "ok", text: "Neuer Tag erstellt." });
-    setDraft(EMPTY);
-    setDirty(false);
-    await loadState({ allowOverwriteMyDraft: true });
-  }
-
-  const canNextDay = !!state?.can_next_day;
-
-  function toggleTheme() {
-    const next: ThemeMode = (theme ?? "light") === "dark" ? "light" : "dark";
-    setTheme(next);
-    applyTheme(next);
+    loadState({ allowOverwriteMyDraft: true });
   }
 
   return (
     <div className="page">
       <main className="container">
-        <div className="header">
-          <div className="header-top">
-            <div>
-              <h1 className="title">Tagesreflexion</h1>
-              <p className="date">{dayDate}</p>
-            </div>
+        <h1 className="title">Tagesreflexion</h1>
+        <p className="date">{dayDate}</p>
 
-            <div className="row">
-              <button className="btn secondary" onClick={toggleTheme} type="button">
-                {theme === "dark" ? "Hellmodus" : "Nachtmodus"}
-              </button>
-
-              <button className="btn" onClick={nextDay} disabled={!canNextDay} type="button">
-                Nächster Tag
-              </button>
-            </div>
-          </div>
-
-          <div className="footerbar">
-            <span className={`badge ${statusMsg?.kind === "ok" ? "ok" : statusMsg?.kind === "err" ? "err" : ""}`}>
-              {statusMsg?.text ?? ""}
-            </span>
-
-            {!canNextDay && (
-              <span className="badge err">dankbar #1–4 müssen ausgefüllt werden.</span>
-            )}
-          </div>
-        </div>
-
-        {/* Zwei Spalten: ich / partner */}
         <div className="grid">
+          {/* ME */}
           <section className="card">
             <h2>{meLabel}&apos;s Reflexion</h2>
 
-            <div className="section-title">Ich bin dankbar für</div>
-            <label className="label">dankbar #1 (Pflicht)</label>
-            <textarea
-              value={draft.general_1}
-              onChange={(e) => {
-                setDraft((d) => ({ ...d, general_1: e.target.value }));
-                setDirty(true);
-              }}
-            />
+            <label className="label">#1 dankbar</label>
+            <textarea value={draft.general_1} onChange={(e) => setDraft({ ...draft, general_1: e.target.value })} />
 
-            <label className="label">dankbar #2 (Pflicht)</label>
-            <textarea
-              value={draft.general_2}
-              onChange={(e) => {
-                setDraft((d) => ({ ...d, general_2: e.target.value }));
-                setDirty(true);
-              }}
-            />
+            <label className="label">#2 dankbar</label>
+            <textarea value={draft.general_2} onChange={(e) => setDraft({ ...draft, general_2: e.target.value })} />
 
-            <div className="section-title">Betreffend {partnerLabel} bin ich dankbar für</div>
-            <label className="label">dankbar #3 (Pflicht)</label>
+            <label className="label">
+              „Betreffend {partnerLabel} bin ich dankbar für...“
+            </label>
             <textarea
               value={draft.partner_specific}
-              onChange={(e) => {
-                setDraft((d) => ({ ...d, partner_specific: e.target.value }));
-                setDirty(true);
-              }}
+              onChange={(e) => setDraft({ ...draft, partner_specific: e.target.value })}
             />
 
-            <div className="section-title">Betreffend Kinder bin ich dankbar für</div>
-            <label className="label">dankbar #4 (Pflicht)</label>
+            <label className="label">
+              „Betreffend Kinder bin ich dankbar für...“
+            </label>
             <textarea
               value={draft.children_gratitude}
-              onChange={(e) => {
-                setDraft((d) => ({ ...d, children_gratitude: e.target.value }));
-                setDirty(true);
-              }}
+              onChange={(e) => setDraft({ ...draft, children_gratitude: e.target.value })}
             />
 
-            {/* Speichern: direkt nach Feld 4, vor Talk-Input */}
-            <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn" onClick={saveMine} disabled={!requiredOk} type="button">
-                Speichern
-              </button>
-              {!requiredOk && <span className="badge err">dankbar #1–4 müssen ausgefüllt werden.</span>}
-              {dirty && <span className="badge">Ungespeichert</span>}
-            </div>
+            <button className="btn" disabled={!requiredOk} onClick={saveMine}>
+              Speichern
+            </button>
+
+            {!requiredOk && <p className="small">#1–#4 dankbar müssen ausgefüllt werden.</p>}
 
             <hr className="sep" />
 
-            <div className="section-title">optional: to talk about</div>
-            <label className="label">optional: to talk about</label>
+            <h3>Darüber möchte ich mich noch austauschen:</h3>
+            <label className="label"># to talk about (optional)</label>
             <textarea
               value={draft.talk_input}
-              onChange={(e) => {
-                setDraft((d) => ({ ...d, talk_input: e.target.value }));
-                setDirty(true);
-              }}
+              onChange={(e) => setDraft({ ...draft, talk_input: e.target.value })}
             />
-
-            <div className="row" style={{ marginTop: 10 }}>
-              <button className="btn" onClick={addTalkItem} disabled={!canAddTalk} type="button">
-                Zu „To talk about“ hinzufügen
-              </button>
-              {!canAddTalk && <span className="badge">Text eingeben, dann hinzufügen.</span>}
-            </div>
           </section>
 
+          {/* PARTNER */}
           <section className="card">
             <h2>{partnerLabel}&apos;s Reflexion</h2>
 
-            <div className="section-title">Ich bin dankbar für</div>
-            <label className="label">dankbar #1</label>
-            <div className="readonly">{otherEntry?.general_1 ?? ""}</div>
+            <div className="readonly">{otherEntry?.general_1 && <>#1 dankbar: {otherEntry.general_1}</>}</div>
+            <div className="readonly">{otherEntry?.general_2 && <>#2 dankbar: {otherEntry.general_2}</>}</div>
+            <div className="readonly">
+              {otherEntry?.partner_specific && (
+                <>„Betreffend {meLabel} bin ich dankbar für...“ {otherEntry.partner_specific}</>
+              )}
+            </div>
+            <div className="readonly">
+              {otherEntry?.children_gratitude && <>„Betreffend Kinder bin ich dankbar für...“ {otherEntry.children_gratitude}</>}
+            </div>
 
-            <label className="label">dankbar #2</label>
-            <div className="readonly">{otherEntry?.general_2 ?? ""}</div>
-
-            <div className="section-title">Betreffend {meLabel} bin ich dankbar für</div>
-            <label className="label">dankbar #3</label>
-            <div className="readonly">{otherEntry?.partner_specific ?? ""}</div>
-
-            <div className="section-title">Betreffend Kinder bin ich dankbar für</div>
-            <label className="label">dankbar #4</label>
-            <div className="readonly">{otherEntry?.children_gratitude ?? ""}</div>
-
-            <div className="section-title">optional: to talk about</div>
-            <p className="small">Offene Punkte findest du unten in der eigenen „To talk about“-Kachel.</p>
-
-            <p className="small" style={{ marginTop: 10 }}>
-              Zuletzt aktualisiert:{" "}
-              {meEntry?.updated_at ? new Date(meEntry.updated_at).toLocaleString("de-DE") : "—"}
-            </p>
+            {/* to talk about nur anzeigen, wenn Partner etwas hat */}
+            {state?.talk?.some((t) => t.created_by === otherRole) && (
+              <p className="small">Offene Gesprächspunkte siehe unten.</p>
+            )}
           </section>
         </div>
 
-        {/* Eigene Kachel: To talk about */}
-        <section className="card" style={{ marginTop: 14 }}>
+        {/* TALK LIST */}
+        <section className="card" style={{ marginTop: 16 }}>
           <TalkList
             role={role}
             talk={state?.talk ?? []}
