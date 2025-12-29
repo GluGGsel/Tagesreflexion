@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import TalkList from "./TalkList";
 import { formatGermanDate } from "@/lib/date";
 import type { Role, StateResponse } from "@/lib/types";
@@ -39,7 +39,6 @@ function applyTheme(mode: ThemeMode) {
 }
 
 function setPageBackdrop(role: Role) {
-  // Farbenfroher “Backdrop” je Rolle, wirkt in light und dark gut.
   const bg =
     role === "mann"
       ? "linear-gradient(135deg, rgba(59,130,246,0.55), rgba(37,99,235,0.40), rgba(2,132,199,0.30))"
@@ -58,17 +57,13 @@ export default function ReflectionPage({ role }: Props) {
   const [statusMsg, setStatusMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
   const [theme, setTheme] = useState<ThemeMode | null>(null);
 
-  const lastSyncRef = useRef<number>(0);
-
   const partnerLabel = useMemo(() => (role === "mann" ? "Frau" : "Mann"), [role]);
   const meLabel = useMemo(() => (role === "mann" ? "Mann" : "Frau"), [role]);
 
-  // Apply role-specific backdrop
   useEffect(() => {
     setPageBackdrop(role);
   }, [role]);
 
-  // Theme init (prefers-color-scheme unless user set override)
   useEffect(() => {
     const saved = getInitialTheme();
     if (saved) {
@@ -76,8 +71,6 @@ export default function ReflectionPage({ role }: Props) {
       applyTheme(saved);
       return;
     }
-    // No saved theme -> do nothing; CSS prefers-color-scheme handles default.
-    // But we keep state so the toggle label is stable:
     const prefersDark =
       typeof window !== "undefined" &&
       window.matchMedia &&
@@ -92,7 +85,6 @@ export default function ReflectionPage({ role }: Props) {
 
     setState(data);
 
-    // Overwrite only if user is not editing (or explicit allow)
     if (allowOverwriteMyDraft) {
       const me = data.entries[role];
       setDraft((prev) => ({
@@ -103,11 +95,9 @@ export default function ReflectionPage({ role }: Props) {
         children_gratitude: me?.children_gratitude ?? ""
       }));
       setDirty(false);
-      lastSyncRef.current = Date.now();
     }
   }
 
-  // initial load
   useEffect(() => {
     loadState({ allowOverwriteMyDraft: true }).catch(() => {
       setStatusMsg({ kind: "err", text: "Konnte Daten nicht laden." });
@@ -115,7 +105,7 @@ export default function ReflectionPage({ role }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
-  // Polling: 5 Minuten (wie zuletzt bei dir gewünscht)
+  // Polling: 5 Minuten
   useEffect(() => {
     const t = setInterval(() => {
       loadState({ allowOverwriteMyDraft: !dirty }).catch(() => {
@@ -240,6 +230,7 @@ export default function ReflectionPage({ role }: Props) {
           </div>
         </div>
 
+        {/* Zwei Spalten: ich / partner */}
         <div className="grid">
           <section className="card">
             <h2>Meine Einträge ({meLabel})</h2>
@@ -326,24 +317,24 @@ export default function ReflectionPage({ role }: Props) {
 
             <div className="section-title">Darüber will ich noch reden</div>
             <p className="small">
-              Diese Punkte stehen direkt darunter unter „To talk about“ – gemeinsam, abhakbar, ohne Interpretationsspielraum.
+              Offene Punkte findest du unten in der eigenen „To talk about“-Kachel.
             </p>
 
             <p className="small" style={{ marginTop: 10 }}>
               Zuletzt aktualisiert:{" "}
               {meEntry?.updated_at ? new Date(meEntry.updated_at).toLocaleString("de-DE") : "—"}
             </p>
-
-            <hr className="sep" />
-
-            {/* Moved here: To talk about under partner view */}
-            <TalkList
-              role={role}
-              talk={state?.talk ?? []}
-              onChanged={async () => loadState({ allowOverwriteMyDraft: false })}
-            />
           </section>
         </div>
+
+        {/* Eigene Kachel: To talk about */}
+        <section className="card" style={{ marginTop: 14 }}>
+          <TalkList
+            role={role}
+            talk={state?.talk ?? []}
+            onChanged={async () => loadState({ allowOverwriteMyDraft: false })}
+          />
+        </section>
       </main>
     </div>
   );
