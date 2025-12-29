@@ -25,17 +25,28 @@ const EMPTY: Draft = {
 };
 
 type ThemeMode = "light" | "dark";
+type ThemeSource = "system" | "manual";
 
-function getInitialTheme(): ThemeMode | null {
+function getSavedTheme(): ThemeMode | null {
   if (typeof window === "undefined") return null;
   const saved = window.localStorage.getItem("theme");
   if (saved === "light" || saved === "dark") return saved;
   return null;
 }
 
-function applyTheme(mode: ThemeMode) {
+function applyThemeOverride(mode: ThemeMode) {
   document.documentElement.setAttribute("data-theme", mode);
   window.localStorage.setItem("theme", mode);
+}
+
+function clearThemeOverride() {
+  document.documentElement.removeAttribute("data-theme");
+  window.localStorage.removeItem("theme");
+}
+
+function getSystemTheme(): ThemeMode {
+  if (typeof window === "undefined") return "light";
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 function setPageBackdrop(role: Role) {
@@ -55,7 +66,10 @@ export default function ReflectionPage({ role }: Props) {
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [dirty, setDirty] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
-  const [theme, setTheme] = useState<ThemeMode | null>(null);
+
+  // theme
+  const [theme, setTheme] = useState<ThemeMode>("light"); // effective theme for UI
+  const [themeSource, setThemeSource] = useState<ThemeSource>("system");
 
   const partnerLabel = useMemo(() => (role === "mann" ? "Joy" : "Emmanuel"), [role]);
   const meLabel = useMemo(() => (role === "mann" ? "Emmanuel" : "Joy"), [role]);
@@ -64,17 +78,32 @@ export default function ReflectionPage({ role }: Props) {
     setPageBackdrop(role);
   }, [role]);
 
+  // Theme init: default = system; only apply override if user has saved one
   useEffect(() => {
-    const saved = getInitialTheme();
+    const saved = getSavedTheme();
     if (saved) {
       setTheme(saved);
-      applyTheme(saved);
+      setThemeSource("manual");
+      applyThemeOverride(saved);
       return;
     }
-    const prefersDark =
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches;
-    setTheme(prefersDark ? "dark" : "light");
+
+    // system default: do NOT set data-theme attribute
+    const sys = getSystemTheme();
+    setTheme(sys);
+    setThemeSource("system");
+
+    // keep UI updated if system theme changes (only when in system mode)
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!mq) return;
+
+    const handler = () => {
+      const next = mq.matches ? "dark" : "light";
+      setTheme(next);
+    };
+
+    mq.addEventListener?.("change", handler);
+    return () => mq.removeEventListener?.("change", handler);
   }, []);
 
   async function loadState({ allowOverwriteMyDraft }: { allowOverwriteMyDraft: boolean }) {
@@ -86,35 +115,46 @@ export default function ReflectionPage({ role }: Props) {
 
     if (allowOverwriteMyDraft) {
       const me = data.entries[role];
-      setDraft({
-        ...draft,
+      setDraft((prev) => ({
+        ...prev,
         general_1: me?.general_1 ?? "",
         general_2: me?.general_2 ?? "",
         partner_specific: me?.partner_specific ?? "",
         children_gratitude: me?.children_gratitude ?? ""
-      });
+      }));
       setDirty(false);
     }
   }
 
   useEffect(() => {
-    loadState({ allowOverwriteMyDraft: true }).catch(() =>
-      setStatusMsg({ kind: "err", text: "Konnte Daten nicht laden." })
-    );
+    loadState({ allowOverwriteMyDraft: true }).catch(() => {
+      setStatusMsg({ kind: "err", text: "Konnte Daten nicht laden." });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
+  // Polling: 5 Minuten
   useEffect(() => {
     const t = setInterval(() => {
-      loadState({ allowOverwriteMyDraft: !dirty }).catch(() =>
-        setStatusMsg({ kind: "err", text: "Auto-Update fehlgeschlagen." })
-      );
+      loadState({ allowOverwriteMyDraft: !dirty }).catch(() => {
+        setStatusMsg({ kind: "err", text: "Auto-Update fehlgeschlagen." });
+      });
     }, 300_000);
     return () => clearInterval(t);
   }, [dirty, role]);
 
   const dayDate = state?.day?.date ? formatGermanDate(state.day.date) : "";
 
+  const meEntry = state?.entries?.[role] ?? null;
   const otherEntry = state?.entries?.[otherRole] ?? null;
+
+  const partnerHasAny =
+    !!otherEntry?.general_1 ||
+    !!otherEntry?.general_2 ||
+    !!otherEntry?.partner_specific ||
+    !!otherEntry?.children_gratitude;
+
+  const canAddTalk = normalizeText(draft.talk_input).length > 0;
 
   const requiredOk = validateRequired4({
     general_1: draft.general_1,
@@ -124,93 +164,238 @@ export default function ReflectionPage({ role }: Props) {
   });
 
   async function saveMine() {
-    await fetch(`/api/entries/${role}`, {
+    setStatusMsg({ kind: "info", text: "Speichern…" });
+    const payload = {
+      general_1: draft.general_1,
+      general_2: draft.general_2,
+      partner_specific: draft.partner_specific,
+      children_gratitude: draft.children_gratitude
+    };
+
+    const res = await fetch(`/api/entries/${role}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        general_1: draft.general_1,
-        general_2: draft.general_2,
-        partner_specific: draft.partner_specific,
-        children_gratitude: draft.children_gratitude
-      })
+      body: JSON.stringify(payload)
     });
+
+    if (!res.ok) {
+      setStatusMsg({ kind: "err", text: "Speichern fehlgeschlagen." });
+      return;
+    }
     setStatusMsg({ kind: "ok", text: "Gespeichert." });
-    loadState({ allowOverwriteMyDraft: true });
+    await loadState({ allowOverwriteMyDraft: true });
   }
+
+  async function addTalkItem() {
+    const text = normalizeText(draft.talk_input);
+    if (!text) return;
+
+    setStatusMsg({ kind: "info", text: "Punkt hinzufügen…" });
+    const res = await fetch("/api/talk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, created_by: role })
+    });
+
+    if (!res.ok) {
+      setStatusMsg({ kind: "err", text: "Konnte Punkt nicht hinzufügen." });
+      return;
+    }
+
+    setDraft((d) => ({ ...d, talk_input: "" }));
+    setDirty(true);
+    setStatusMsg({ kind: "ok", text: "Punkt hinzugefügt." });
+    await loadState({ allowOverwriteMyDraft: false });
+  }
+
+  async function nextDay() {
+    setStatusMsg({ kind: "info", text: "Wechsle Tag…" });
+    const res = await fetch("/api/day/next", { method: "POST" });
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      setStatusMsg({ kind: "err", text: t || "Nächster Tag nicht möglich." });
+      return;
+    }
+
+    setStatusMsg({ kind: "ok", text: "Neuer Tag erstellt." });
+    setDraft(EMPTY);
+    setDirty(false);
+    await loadState({ allowOverwriteMyDraft: true });
+  }
+
+  const canNextDay = !!state?.can_next_day;
+
+  // Switch behavior:
+  // - default: system (no override)
+  // - user toggles: set manual override to opposite of current effective theme
+  function toggleThemeSwitch() {
+    const next: ThemeMode = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    setThemeSource("manual");
+    applyThemeOverride(next);
+  }
+
+  // Optional: long-press / right-click could reset to system; not requested.
+  // But we provide a subtle reset on double-click of the hint text (tiny, safe).
+  function resetToSystem() {
+    clearThemeOverride();
+    const sys = getSystemTheme();
+    setTheme(sys);
+    setThemeSource("system");
+  }
+
+  const switchChecked = theme === "dark";
 
   return (
     <div className="page">
       <main className="container">
-        <h1 className="title">Tagesreflexion</h1>
-        <p className="date">{dayDate}</p>
+        <div className="header">
+          <div className="header-top">
+            <div>
+              <h1 className="title">Tagesreflexion</h1>
+              <p className="date">{dayDate}</p>
+            </div>
+
+            <div className="row">
+              {/* Small unobtrusive switch */}
+              <div className="theme-switch" data-checked={switchChecked ? "true" : "false"}>
+                <label className="track" title="Nachtmodus umschalten">
+                  <input
+                    type="checkbox"
+                    checked={switchChecked}
+                    onChange={toggleThemeSwitch}
+                    aria-label="Nachtmodus"
+                  />
+                  <span className="thumb" />
+                </label>
+                <span className="hint" title="Doppelklick: wieder System">
+                  <span onDoubleClick={resetToSystem} style={{ cursor: "default" }}>
+                    {themeSource === "system" ? "System" : "Manuell"}
+                  </span>
+                </span>
+              </div>
+
+              <button className="btn" onClick={nextDay} disabled={!canNextDay} type="button">
+                Nächster Tag
+              </button>
+            </div>
+          </div>
+
+          <div className="footerbar">
+            <span className={`badge ${statusMsg?.kind === "ok" ? "ok" : statusMsg?.kind === "err" ? "err" : ""}`}>
+              {statusMsg?.text ?? ""}
+            </span>
+
+            {!canNextDay && <span className="badge err">#1–#4 dankbar müssen ausgefüllt werden.</span>}
+          </div>
+        </div>
 
         <div className="grid">
-          {/* ME */}
           <section className="card">
             <h2>{meLabel}&apos;s Reflexion</h2>
 
+            <div className="section-title">„Ich bin dankbar für...“</div>
+
             <label className="label">#1 dankbar</label>
-            <textarea value={draft.general_1} onChange={(e) => setDraft({ ...draft, general_1: e.target.value })} />
+            <textarea
+              value={draft.general_1}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, general_1: e.target.value }));
+                setDirty(true);
+              }}
+            />
 
             <label className="label">#2 dankbar</label>
-            <textarea value={draft.general_2} onChange={(e) => setDraft({ ...draft, general_2: e.target.value })} />
+            <textarea
+              value={draft.general_2}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, general_2: e.target.value }));
+                setDirty(true);
+              }}
+            />
 
-            <label className="label">
-              „Betreffend {partnerLabel} bin ich dankbar für...“
-            </label>
+            <div className="section-title">„Betreffend {partnerLabel} bin ich dankbar für...“</div>
+            <label className="label">#3 dankbar</label>
             <textarea
               value={draft.partner_specific}
-              onChange={(e) => setDraft({ ...draft, partner_specific: e.target.value })}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, partner_specific: e.target.value }));
+                setDirty(true);
+              }}
             />
 
-            <label className="label">
-              „Betreffend Kinder bin ich dankbar für...“
-            </label>
+            <div className="section-title">„Betreffend Kinder bin ich dankbar für...“</div>
+            <label className="label">#4 dankbar</label>
             <textarea
               value={draft.children_gratitude}
-              onChange={(e) => setDraft({ ...draft, children_gratitude: e.target.value })}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, children_gratitude: e.target.value }));
+                setDirty(true);
+              }}
             />
 
-            <button className="btn" disabled={!requiredOk} onClick={saveMine}>
-              Speichern
-            </button>
-
-            {!requiredOk && <p className="small">#1–#4 dankbar müssen ausgefüllt werden.</p>}
+            <div className="row" style={{ marginTop: 10 }}>
+              <button className="btn" onClick={saveMine} disabled={!requiredOk} type="button">
+                Speichern
+              </button>
+              {!requiredOk && <span className="badge err">#1–#4 dankbar müssen ausgefüllt werden.</span>}
+              {dirty && <span className="badge">Ungespeichert</span>}
+            </div>
 
             <hr className="sep" />
 
-            <h3>Darüber möchte ich mich noch austauschen:</h3>
+            <div className="section-title">Darüber möchte ich mich noch austauschen:</div>
             <label className="label"># to talk about (optional)</label>
             <textarea
               value={draft.talk_input}
-              onChange={(e) => setDraft({ ...draft, talk_input: e.target.value })}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, talk_input: e.target.value }));
+                setDirty(true);
+              }}
             />
+
+            <div className="row" style={{ marginTop: 10 }}>
+              <button className="btn" onClick={addTalkItem} disabled={!canAddTalk} type="button">
+                Zu „To talk about“ hinzufügen
+              </button>
+              {!canAddTalk && <span className="badge">Text eingeben, dann hinzufügen.</span>}
+            </div>
           </section>
 
-          {/* PARTNER */}
           <section className="card">
             <h2>{partnerLabel}&apos;s Reflexion</h2>
 
-            <div className="readonly">{otherEntry?.general_1 && <>#1 dankbar: {otherEntry.general_1}</>}</div>
-            <div className="readonly">{otherEntry?.general_2 && <>#2 dankbar: {otherEntry.general_2}</>}</div>
-            <div className="readonly">
-              {otherEntry?.partner_specific && (
-                <>„Betreffend {meLabel} bin ich dankbar für...“ {otherEntry.partner_specific}</>
-              )}
-            </div>
-            <div className="readonly">
-              {otherEntry?.children_gratitude && <>„Betreffend Kinder bin ich dankbar für...“ {otherEntry.children_gratitude}</>}
-            </div>
+            <div className="section-title">„Ich bin dankbar für...“</div>
 
-            {/* to talk about nur anzeigen, wenn Partner etwas hat */}
-            {state?.talk?.some((t) => t.created_by === otherRole) && (
-              <p className="small">Offene Gesprächspunkte siehe unten.</p>
+            <label className="label">#1 dankbar</label>
+            <div className="readonly">{otherEntry?.general_1 ?? ""}</div>
+
+            <label className="label">#2 dankbar</label>
+            <div className="readonly">{otherEntry?.general_2 ?? ""}</div>
+
+            <div className="section-title">„Betreffend {meLabel} bin ich dankbar für...“</div>
+            <label className="label">#3 dankbar</label>
+            <div className="readonly">{otherEntry?.partner_specific ?? ""}</div>
+
+            <div className="section-title">„Betreffend Kinder bin ich dankbar für...“</div>
+            <label className="label">#4 dankbar</label>
+            <div className="readonly">{otherEntry?.children_gratitude ?? ""}</div>
+
+            {partnerHasAny && (
+              <>
+                <div className="section-title">Darüber möchte ich mich noch austauschen:</div>
+                <p className="small">Siehe unten in der „To talk about“-Kachel.</p>
+              </>
             )}
+
+            <p className="small" style={{ marginTop: 10 }}>
+              Zuletzt aktualisiert:{" "}
+              {meEntry?.updated_at ? new Date(meEntry.updated_at).toLocaleString("de-DE") : "—"}
+            </p>
           </section>
         </div>
 
-        {/* TALK LIST */}
-        <section className="card" style={{ marginTop: 16 }}>
+        <section className="card" style={{ marginTop: 14 }}>
           <TalkList
             role={role}
             talk={state?.talk ?? []}
