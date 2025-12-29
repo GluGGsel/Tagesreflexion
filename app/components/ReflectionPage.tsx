@@ -169,7 +169,7 @@ export default function ReflectionPage({ role }: Props) {
     }
 
     setDraft((d) => ({ ...d, talk_input: "" }));
-    setDirty(true); // talk input changed
+    setDirty(true);
     setStatusMsg({ kind: "ok", text: "Punkt hinzugefügt." });
     await loadState({ allowOverwriteMyDraft: false });
   }
@@ -224,9 +224,7 @@ export default function ReflectionPage({ role }: Props) {
             </span>
 
             {!canNextDay && (
-              <span className="badge err">
-                „Nächster Tag“ wird aktiv, sobald beide Pflichtfelder (1–4) ausgefüllt haben.
-              </span>
+              <span className="badge err">dankbar #1–4 müssen ausgefüllt werden.</span>
             )}
           </div>
         </div>
@@ -234,10 +232,10 @@ export default function ReflectionPage({ role }: Props) {
         {/* Zwei Spalten: ich / partner */}
         <div className="grid">
           <section className="card">
-            <h2>Meine Einträge ({meLabel})</h2>
+            <h2>{meLabel}&apos;s Reflexion</h2>
 
             <div className="section-title">Ich bin dankbar für</div>
-            <label className="label">Feld 1 (Pflicht)</label>
+            <label className="label">dankbar #1 (Pflicht)</label>
             <textarea
               value={draft.general_1}
               onChange={(e) => {
@@ -246,7 +244,7 @@ export default function ReflectionPage({ role }: Props) {
               }}
             />
 
-            <label className="label">Feld 2 (Pflicht)</label>
+            <label className="label">dankbar #2 (Pflicht)</label>
             <textarea
               value={draft.general_2}
               onChange={(e) => {
@@ -256,7 +254,7 @@ export default function ReflectionPage({ role }: Props) {
             />
 
             <div className="section-title">Betreffend {partnerLabel} bin ich dankbar für</div>
-            <label className="label">Feld 3 (Pflicht)</label>
+            <label className="label">dankbar #3 (Pflicht)</label>
             <textarea
               value={draft.partner_specific}
               onChange={(e) => {
@@ -265,8 +263,8 @@ export default function ReflectionPage({ role }: Props) {
               }}
             />
 
-            <div className="section-title">Betreffend Kinder bin ich dankbar</div>
-            <label className="label">Feld 4 (Pflicht)</label>
+            <div className="section-title">Betreffend Kinder bin ich dankbar für</div>
+            <label className="label">dankbar #4 (Pflicht)</label>
             <textarea
               value={draft.children_gratitude}
               onChange={(e) => {
@@ -280,14 +278,14 @@ export default function ReflectionPage({ role }: Props) {
               <button className="btn" onClick={saveMine} disabled={!requiredOk} type="button">
                 Speichern
               </button>
-              {!requiredOk && <span className="badge err">Pflichtfelder 1–4 müssen ausgefüllt sein.</span>}
+              {!requiredOk && <span className="badge err">dankbar #1–4 müssen ausgefüllt werden.</span>}
               {dirty && <span className="badge">Ungespeichert</span>}
             </div>
 
             <hr className="sep" />
 
-            <div className="section-title">Darüber will ich noch reden</div>
-            <label className="label">Feld 5 (optional → „To talk about“)</label>
+            <div className="section-title">optional: to talk about</div>
+            <label className="label">optional: to talk about</label>
             <textarea
               value={draft.talk_input}
               onChange={(e) => {
@@ -305,27 +303,25 @@ export default function ReflectionPage({ role }: Props) {
           </section>
 
           <section className="card">
-            <h2>Einträge von {partnerLabel}</h2>
+            <h2>{partnerLabel}&apos;s Reflexion</h2>
 
             <div className="section-title">Ich bin dankbar für</div>
-            <label className="label">Feld 1</label>
+            <label className="label">dankbar #1</label>
             <div className="readonly">{otherEntry?.general_1 ?? ""}</div>
 
-            <label className="label">Feld 2</label>
+            <label className="label">dankbar #2</label>
             <div className="readonly">{otherEntry?.general_2 ?? ""}</div>
 
             <div className="section-title">Betreffend {meLabel} bin ich dankbar für</div>
-            <label className="label">Feld 3</label>
+            <label className="label">dankbar #3</label>
             <div className="readonly">{otherEntry?.partner_specific ?? ""}</div>
 
-            <div className="section-title">Betreffend Kinder bin ich dankbar</div>
-            <label className="label">Feld 4</label>
+            <div className="section-title">Betreffend Kinder bin ich dankbar für</div>
+            <label className="label">dankbar #4</label>
             <div className="readonly">{otherEntry?.children_gratitude ?? ""}</div>
 
-            <div className="section-title">Darüber will ich noch reden</div>
-            <p className="small">
-              Offene Punkte findest du unten in der eigenen „To talk about“-Kachel.
-            </p>
+            <div className="section-title">optional: to talk about</div>
+            <p className="small">Offene Punkte findest du unten in der eigenen „To talk about“-Kachel.</p>
 
             <p className="small" style={{ marginTop: 10 }}>
               Zuletzt aktualisiert:{" "}
