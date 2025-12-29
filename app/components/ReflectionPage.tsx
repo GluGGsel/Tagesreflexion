@@ -57,8 +57,8 @@ export default function ReflectionPage({ role }: Props) {
   const [statusMsg, setStatusMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
   const [theme, setTheme] = useState<ThemeMode | null>(null);
 
-  const partnerLabel = useMemo(() => (role === "mann" ? "Frau" : "Mann"), [role]);
-  const meLabel = useMemo(() => (role === "mann" ? "Mann" : "Frau"), [role]);
+  const partnerLabel = useMemo(() => (role === "mann" ? "Joy" : "Emmanuel"), [role]);
+  const meLabel = useMemo(() => (role === "mann" ? "Emmanuel" : "Joy"), [role]);
 
   useEffect(() => {
     setPageBackdrop(role);
