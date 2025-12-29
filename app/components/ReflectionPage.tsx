@@ -25,17 +25,28 @@ const EMPTY: Draft = {
 };
 
 type ThemeMode = "light" | "dark";
+type ThemeSource = "system" | "manual";
 
-function getInitialTheme(): ThemeMode | null {
+function getSavedTheme(): ThemeMode | null {
   if (typeof window === "undefined") return null;
   const saved = window.localStorage.getItem("theme");
   if (saved === "light" || saved === "dark") return saved;
   return null;
 }
 
-function applyTheme(mode: ThemeMode) {
+function applyThemeOverride(mode: ThemeMode) {
   document.documentElement.setAttribute("data-theme", mode);
   window.localStorage.setItem("theme", mode);
+}
+
+function clearThemeOverride() {
+  document.documentElement.removeAttribute("data-theme");
+  window.localStorage.removeItem("theme");
+}
+
+function getSystemTheme(): ThemeMode {
+  if (typeof window === "undefined") return "light";
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 function setPageBackdrop(role: Role) {
@@ -55,7 +66,10 @@ export default function ReflectionPage({ role }: Props) {
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [dirty, setDirty] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
-  const [theme, setTheme] = useState<ThemeMode | null>(null);
+
+  // theme
+  const [theme, setTheme] = useState<ThemeMode>("light"); // effective theme for UI
+  const [themeSource, setThemeSource] = useState<ThemeSource>("system");
 
   const partnerLabel = useMemo(() => (role === "mann" ? "Frau" : "Mann"), [role]);
   const meLabel = useMemo(() => (role === "mann" ? "Mann" : "Frau"), [role]);
@@ -64,19 +78,32 @@ export default function ReflectionPage({ role }: Props) {
     setPageBackdrop(role);
   }, [role]);
 
-  // Theme init (saved override > system preference)
+  // Theme init: default = system; only apply override if user has saved one
   useEffect(() => {
-    const saved = getInitialTheme();
+    const saved = getSavedTheme();
     if (saved) {
       setTheme(saved);
-      applyTheme(saved);
+      setThemeSource("manual");
+      applyThemeOverride(saved);
       return;
     }
-    const prefersDark =
-      typeof window !== "undefined" &&
-      window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches;
-    setTheme(prefersDark ? "dark" : "light");
+
+    // system default: do NOT set data-theme attribute
+    const sys = getSystemTheme();
+    setTheme(sys);
+    setThemeSource("system");
+
+    // keep UI updated if system theme changes (only when in system mode)
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!mq) return;
+
+    const handler = () => {
+      const next = mq.matches ? "dark" : "light";
+      setTheme(next);
+    };
+
+    mq.addEventListener?.("change", handler);
+    return () => mq.removeEventListener?.("change", handler);
   }, []);
 
   async function loadState({ allowOverwriteMyDraft }: { allowOverwriteMyDraft: boolean }) {
@@ -198,11 +225,26 @@ export default function ReflectionPage({ role }: Props) {
 
   const canNextDay = !!state?.can_next_day;
 
-  function toggleTheme() {
-    const next: ThemeMode = (theme ?? "light") === "dark" ? "light" : "dark";
+  // Switch behavior:
+  // - default: system (no override)
+  // - user toggles: set manual override to opposite of current effective theme
+  function toggleThemeSwitch() {
+    const next: ThemeMode = theme === "dark" ? "light" : "dark";
     setTheme(next);
-    applyTheme(next);
+    setThemeSource("manual");
+    applyThemeOverride(next);
   }
+
+  // Optional: long-press / right-click could reset to system; not requested.
+  // But we provide a subtle reset on double-click of the hint text (tiny, safe).
+  function resetToSystem() {
+    clearThemeOverride();
+    const sys = getSystemTheme();
+    setTheme(sys);
+    setThemeSource("system");
+  }
+
+  const switchChecked = theme === "dark";
 
   return (
     <div className="page">
@@ -215,9 +257,23 @@ export default function ReflectionPage({ role }: Props) {
             </div>
 
             <div className="row">
-              <button className="btn secondary" onClick={toggleTheme} type="button">
-                {theme === "dark" ? "Hellmodus" : "Nachtmodus"}
-              </button>
+              {/* Small unobtrusive switch */}
+              <div className="theme-switch" data-checked={switchChecked ? "true" : "false"}>
+                <label className="track" title="Nachtmodus umschalten">
+                  <input
+                    type="checkbox"
+                    checked={switchChecked}
+                    onChange={toggleThemeSwitch}
+                    aria-label="Nachtmodus"
+                  />
+                  <span className="thumb" />
+                </label>
+                <span className="hint" title="Doppelklick: wieder System">
+                  <span onDoubleClick={resetToSystem} style={{ cursor: "default" }}>
+                    {themeSource === "system" ? "System" : "Manuell"}
+                  </span>
+                </span>
+              </div>
 
               <button className="btn" onClick={nextDay} disabled={!canNextDay} type="button">
                 Nächster Tag
@@ -234,7 +290,6 @@ export default function ReflectionPage({ role }: Props) {
           </div>
         </div>
 
-        {/* Zwei Spalten: ich / partner */}
         <div className="grid">
           <section className="card">
             <h2>{meLabel}&apos;s Reflexion</h2>
@@ -340,7 +395,6 @@ export default function ReflectionPage({ role }: Props) {
           </section>
         </div>
 
-        {/* Eigene Kachel: To talk about */}
         <section className="card" style={{ marginTop: 14 }}>
           <TalkList
             role={role}
