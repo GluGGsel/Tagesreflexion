@@ -4,16 +4,13 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Tagesreflexion",
   description: "Tagesreflexion",
-  // Wichtig: absolute Pfade (beginnen mit /), damit es auf /frau und /mann gleich funktioniert
-  manifest: "/manifest.webmanifest",
+  // WICHTIG: kein globales manifest hier, damit /mann und /frau jeweils ihr eigenes setzen können
   icons: {
     icon: [
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }
     ],
-    apple: [
-      { url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }
-    ]
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }]
   },
   appleWebApp: {
     capable: true,
@@ -38,9 +35,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="apple-mobile-web-app-title" content="Tagesreflexion" />
         <meta name="mobile-web-app-capable" content="yes" />
 
-        {/* absolute icon paths: wichtig für /frau */}
+        {/* absolute icon paths */}
         <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-        <link rel="manifest" href="/manifest.webmanifest" />
       </head>
       <body>{children}</body>
     </html>
