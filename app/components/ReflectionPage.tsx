@@ -49,7 +49,8 @@ function getSystemTheme(): ThemeMode {
   return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-function setPageBackdrop(role: Role) {
+function setPageBackdropAndCards(role: Role) {
+  // Page backdrop
   const bg =
     role === "mann"
       ? "linear-gradient(135deg, rgba(59,130,246,0.55), rgba(37,99,235,0.40), rgba(2,132,199,0.30))"
@@ -57,6 +58,17 @@ function setPageBackdrop(role: Role) {
 
   document.body.style.background = bg;
   document.documentElement.style.setProperty("--page-bg", bg);
+
+  // Card backgrounds (distinct from page gradient)
+  // Mann view: my cards blue, partner cards pink. Frau view: reversed.
+  const blue = "rgba(59, 130, 246, 0.22)";  // lighter, different from backdrop
+  const pink = "rgba(236, 72, 153, 0.20)";
+
+  const me = role === "mann" ? blue : pink;
+  const partner = role === "mann" ? pink : blue;
+
+  document.documentElement.style.setProperty("--card-me-bg", me);
+  document.documentElement.style.setProperty("--card-partner-bg", partner);
 }
 
 export default function ReflectionPage({ role }: Props) {
@@ -68,17 +80,17 @@ export default function ReflectionPage({ role }: Props) {
   const [statusMsg, setStatusMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
 
   // theme
-  const [theme, setTheme] = useState<ThemeMode>("light"); // effective theme for UI
+  const [theme, setTheme] = useState<ThemeMode>("light"); // effective theme
   const [themeSource, setThemeSource] = useState<ThemeSource>("system");
 
   const partnerLabel = useMemo(() => (role === "mann" ? "Joy" : "Emmanuel"), [role]);
   const meLabel = useMemo(() => (role === "mann" ? "Emmanuel" : "Joy"), [role]);
 
   useEffect(() => {
-    setPageBackdrop(role);
+    setPageBackdropAndCards(role);
   }, [role]);
 
-  // Theme init: default = system; only apply override if user has saved one
+  // Theme init: default = system; only override if user set one
   useEffect(() => {
     const saved = getSavedTheme();
     if (saved) {
@@ -88,12 +100,10 @@ export default function ReflectionPage({ role }: Props) {
       return;
     }
 
-    // system default: do NOT set data-theme attribute
     const sys = getSystemTheme();
     setTheme(sys);
     setThemeSource("system");
 
-    // keep UI updated if system theme changes (only when in system mode)
     const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
     if (!mq) return;
 
@@ -107,6 +117,7 @@ export default function ReflectionPage({ role }: Props) {
   }, []);
 
   async function loadState({ allowOverwriteMyDraft }: { allowOverwriteMyDraft: boolean }) {
+    // Server entscheidet automatisch, welcher Tag "heute" ist (Host-Zeit)
     const res = await fetch("/api/state", { cache: "no-store" });
     if (!res.ok) throw new Error("state fetch failed");
     const data = (await res.json()) as StateResponse;
@@ -156,6 +167,7 @@ export default function ReflectionPage({ role }: Props) {
 
   const canAddTalk = normalizeText(draft.talk_input).length > 0;
 
+  // Pflichtfeld-Logik bleibt (Speichern nur bei #1–#4)
   const requiredOk = validateRequired4({
     general_1: draft.general_1,
     general_2: draft.general_2,
@@ -208,26 +220,9 @@ export default function ReflectionPage({ role }: Props) {
     await loadState({ allowOverwriteMyDraft: false });
   }
 
-  async function nextDay() {
-    setStatusMsg({ kind: "info", text: "Wechsle Tag…" });
-    const res = await fetch("/api/day/next", { method: "POST" });
-    if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      setStatusMsg({ kind: "err", text: t || "Nächster Tag nicht möglich." });
-      return;
-    }
-
-    setStatusMsg({ kind: "ok", text: "Neuer Tag erstellt." });
-    setDraft(EMPTY);
-    setDirty(false);
-    await loadState({ allowOverwriteMyDraft: true });
-  }
-
-  const canNextDay = !!state?.can_next_day;
-
   // Switch behavior:
   // - default: system (no override)
-  // - user toggles: set manual override to opposite of current effective theme
+  // - toggle: set manual override to opposite
   function toggleThemeSwitch() {
     const next: ThemeMode = theme === "dark" ? "light" : "dark";
     setTheme(next);
@@ -235,8 +230,6 @@ export default function ReflectionPage({ role }: Props) {
     applyThemeOverride(next);
   }
 
-  // Optional: long-press / right-click could reset to system; not requested.
-  // But we provide a subtle reset on double-click of the hint text (tiny, safe).
   function resetToSystem() {
     clearThemeOverride();
     const sys = getSystemTheme();
@@ -257,7 +250,6 @@ export default function ReflectionPage({ role }: Props) {
             </div>
 
             <div className="row">
-              {/* Small unobtrusive switch */}
               <div className="theme-switch" data-checked={switchChecked ? "true" : "false"}>
                 <label className="track" title="Nachtmodus umschalten">
                   <input
@@ -274,10 +266,6 @@ export default function ReflectionPage({ role }: Props) {
                   </span>
                 </span>
               </div>
-
-              <button className="btn" onClick={nextDay} disabled={!canNextDay} type="button">
-                Nächster Tag
-              </button>
             </div>
           </div>
 
@@ -286,12 +274,12 @@ export default function ReflectionPage({ role }: Props) {
               {statusMsg?.text ?? ""}
             </span>
 
-            {!canNextDay && <span className="badge err">#1–#4 dankbar müssen ausgefüllt werden.</span>}
+            <span className="badge err">#1–#4 dankbar müssen ausgefüllt werden.</span>
           </div>
         </div>
 
         <div className="grid">
-          <section className="card">
+          <section className="card me">
             <h2>{meLabel}&apos;s Reflexion</h2>
 
             <div className="section-title">„Ich bin dankbar für...“</div>
@@ -362,7 +350,7 @@ export default function ReflectionPage({ role }: Props) {
             </div>
           </section>
 
-          <section className="card">
+          <section className="card partner">
             <h2>{partnerLabel}&apos;s Reflexion</h2>
 
             <div className="section-title">„Ich bin dankbar für...“</div>

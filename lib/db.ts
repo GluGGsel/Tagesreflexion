@@ -1,209 +1,162 @@
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
-import { SCHEMA_SQL } from "./schema";
-import type { Role } from "./types";
-import { validateRequired4, normalizeText } from "./validators";
 
-const DATA_DIR = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
-const DB_PATH = process.env.DB_PATH ?? path.join(DATA_DIR, "tagesreflexion.sqlite");
+const DATA_DIR = path.join(process.cwd(), "data");
+const DB_PATH = path.join(DATA_DIR, "tagesreflexion.sqlite");
 
 let db: Database.Database | null = null;
 
-function nowIso() {
-  return new Date().toISOString();
+function ensureDir() {
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-function todayYYYYMMDD(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function initSchema(d: Database.Database) {
+  d.exec(`
+    PRAGMA journal_mode = WAL;
+
+    CREATE TABLE IF NOT EXISTS days (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL UNIQUE
+    );
+
+    CREATE TABLE IF NOT EXISTS entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day_id INTEGER NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('mann','frau')),
+      general_1 TEXT NOT NULL,
+      general_2 TEXT NOT NULL,
+      partner_specific TEXT NOT NULL,
+      children_gratitude TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(day_id, role),
+      FOREIGN KEY(day_id) REFERENCES days(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS talk_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      text TEXT NOT NULL,
+      created_by TEXT NOT NULL CHECK(created_by IN ('mann','frau')),
+      created_at TEXT NOT NULL,
+      done INTEGER NOT NULL DEFAULT 0
+    );
+  `);
 }
 
-export function getDb(): Database.Database {
+export function getDb() {
   if (db) return db;
-
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  ensureDir();
   db = new Database(DB_PATH);
-
-  db.exec(SCHEMA_SQL);
-  ensureOpenDayExists();
-  ensureEntriesForOpenDay();
-
+  initSchema(db);
   return db;
 }
 
-function ensureOpenDayExists() {
-  const d = getDb();
-  const open = d.prepare("SELECT id FROM days WHERE status='open' ORDER BY id DESC LIMIT 1").get() as
-    | { id: number }
-    | undefined;
-
-  if (!open) {
-    const date = todayYYYYMMDD();
-    d.prepare("INSERT INTO days(day_date, status, created_at) VALUES (?, 'open', ?)").run(date, nowIso());
-  }
+/**
+ * Return today's date (YYYY-MM-DD) based on SERVER time.
+ * Uses Europe/Zurich to be deterministic (host should already be set, but iOS users love surprises).
+ */
+export function todayISO(): string {
+  const tz = "Europe/Zurich";
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  return fmt.format(new Date()); // en-CA => YYYY-MM-DD
 }
 
-function ensureEntriesForOpenDay() {
+/** Ensure a days-row exists for today's date and return its id. */
+export function ensureTodayDayId(): number {
   const d = getDb();
-  const day = d.prepare("SELECT id FROM days WHERE status='open' ORDER BY id DESC LIMIT 1").get() as { id: number };
+  const date = todayISO();
 
-  for (const role of ["mann", "frau"] as Role[]) {
-    d.prepare(
-      `INSERT OR IGNORE INTO entries(day_id, role, general_1, general_2, partner_specific, children_gratitude, updated_at)
-       VALUES (?, ?, '', '', '', '', NULL)`
-    ).run(day.id, role);
-  }
+  const row = d.prepare(`SELECT id FROM days WHERE date = ?`).get(date) as { id: number } | undefined;
+  if (row?.id) return row.id;
+
+  const info = d.prepare(`INSERT INTO days(date) VALUES(?)`).run(date);
+  return Number(info.lastInsertRowid);
 }
 
-export function getState() {
+/** Get entries for today keyed by role. */
+export function getTodayEntries(): {
+  day: { id: number; date: string };
+  entries: { mann: any | null; frau: any | null };
+} {
   const d = getDb();
-  const day = d.prepare("SELECT id, day_date as date, status FROM days WHERE status='open' ORDER BY id DESC LIMIT 1").get() as
-    | { id: number; date: string; status: "open" | "closed" }
-    | undefined;
+  const dayId = ensureTodayDayId();
+  const date = todayISO();
 
-  if (!day) {
-    ensureOpenDayExists();
-    ensureEntriesForOpenDay();
-    return getState();
-  }
-
-  const entries = d
+  const rows = d
     .prepare(
       `SELECT role, general_1, general_2, partner_specific, children_gratitude, updated_at
-       FROM entries WHERE day_id = ?`
+       FROM entries
+       WHERE day_id = ?`
     )
-    .all(day.id) as Array<{
-    role: Role;
+    .all(dayId) as Array<{
+    role: "mann" | "frau";
     general_1: string;
     general_2: string;
     partner_specific: string;
     children_gratitude: string;
-    updated_at: string | null;
+    updated_at: string;
   }>;
 
-  const map: any = { mann: null, frau: null };
-  for (const e of entries) map[e.role] = e;
+  const out: { mann: any | null; frau: any | null } = { mann: null, frau: null };
+  for (const r of rows) out[r.role] = r;
 
-  const talk = d
-    .prepare(
-      `SELECT id, text, created_by, origin_created_at
-       FROM talk_items
-       WHERE day_id = ? AND is_done = 0
-       ORDER BY origin_created_at ASC, created_at ASC, id ASC`
-    )
-    .all(day.id) as Array<{ id: number; text: string; created_by: Role; origin_created_at: string }>;
-
-  const can_next_day = validateRequired4({
-    general_1: map.mann?.general_1 ?? "",
-    general_2: map.mann?.general_2 ?? "",
-    partner_specific: map.mann?.partner_specific ?? "",
-    children_gratitude: map.mann?.children_gratitude ?? ""
-  }) && validateRequired4({
-    general_1: map.frau?.general_1 ?? "",
-    general_2: map.frau?.general_2 ?? "",
-    partner_specific: map.frau?.partner_specific ?? "",
-    children_gratitude: map.frau?.children_gratitude ?? ""
-  });
-
-  return {
-    day,
-    entries: {
-      mann: map.mann,
-      frau: map.frau
-    },
-    talk,
-    can_next_day
-  };
+  return { day: { id: dayId, date }, entries: out };
 }
 
-export function updateEntry(role: Role, payload: any) {
+export function upsertEntryForToday(role: "mann" | "frau", payload: {
+  general_1: string;
+  general_2: string;
+  partner_specific: string;
+  children_gratitude: string;
+}) {
   const d = getDb();
-  const day = d.prepare("SELECT id FROM days WHERE status='open' ORDER BY id DESC LIMIT 1").get() as { id: number };
-
-  const general_1 = normalizeText(payload.general_1 ?? "");
-  const general_2 = normalizeText(payload.general_2 ?? "");
-  const partner_specific = normalizeText(payload.partner_specific ?? "");
-  const children_gratitude = normalizeText(payload.children_gratitude ?? "");
+  const dayId = ensureTodayDayId();
+  const now = new Date().toISOString();
 
   d.prepare(
-    `UPDATE entries
-     SET general_1=?, general_2=?, partner_specific=?, children_gratitude=?, updated_at=?
-     WHERE day_id=? AND role=?`
-  ).run(general_1, general_2, partner_specific, children_gratitude, nowIso(), day.id, role);
+    `INSERT INTO entries(day_id, role, general_1, general_2, partner_specific, children_gratitude, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(day_id, role) DO UPDATE SET
+       general_1 = excluded.general_1,
+       general_2 = excluded.general_2,
+       partner_specific = excluded.partner_specific,
+       children_gratitude = excluded.children_gratitude,
+       updated_at = excluded.updated_at`
+  ).run(
+    dayId,
+    role,
+    payload.general_1,
+    payload.general_2,
+    payload.partner_specific,
+    payload.children_gratitude,
+    now
+  );
 }
 
-export function addTalkItem(text: string, created_by: Role) {
+export function listOpenTalk() {
   const d = getDb();
-  const day = d.prepare("SELECT id FROM days WHERE status='open' ORDER BY id DESC LIMIT 1").get() as { id: number };
+  return d.prepare(
+    `SELECT id, text, created_by, created_at
+     FROM talk_items
+     WHERE done = 0
+     ORDER BY datetime(created_at) ASC`
+  ).all() as Array<{ id: number; text: string; created_by: "mann" | "frau"; created_at: string }>;
+}
 
-  const t = normalizeText(text);
-  if (!t) return;
-
-  const ts = nowIso();
+export function addTalk(created_by: "mann" | "frau", text: string) {
+  const d = getDb();
   d.prepare(
-    `INSERT INTO talk_items(day_id, text, created_by, created_at, origin_created_at, is_done)
-     VALUES (?, ?, ?, ?, ?, 0)`
-  ).run(day.id, t, created_by, ts, ts);
+    `INSERT INTO talk_items(text, created_by, created_at, done)
+     VALUES (?, ?, ?, 0)`
+  ).run(text, created_by, new Date().toISOString());
 }
 
-export function markTalkDone(id: number, done_by: Role) {
+export function markTalkDone(id: number) {
   const d = getDb();
-  d.prepare(
-    `UPDATE talk_items
-     SET is_done=1, done_at=?, done_by=?
-     WHERE id=?`
-  ).run(nowIso(), done_by, id);
-}
-
-export function nextDay() {
-  const d = getDb();
-  // Transaction ensures "only one next day" even if clicked simultaneously.
-  const tx = d.transaction(() => {
-    const state = getState();
-    if (!state.can_next_day) {
-      throw new Error("Nächster Tag ist erst möglich, wenn beide Pflichtfelder (1–4) ausgefüllt haben.");
-    }
-
-    const oldDayId = state.day.id;
-
-    // close current day
-    d.prepare("UPDATE days SET status='closed', closed_at=? WHERE id=?").run(nowIso(), oldDayId);
-
-    // create new day with today's date (or increment - we keep it simple and consistent)
-    const newDate = todayYYYYMMDD();
-    const info = d.prepare("INSERT INTO days(day_date, status, created_at) VALUES (?, 'open', ?)").run(newDate, nowIso());
-    const newDayId = Number(info.lastInsertRowid);
-
-    // create empty entries for both roles
-    for (const role of ["mann", "frau"] as Role[]) {
-      d.prepare(
-        `INSERT INTO entries(day_id, role, general_1, general_2, partner_specific, children_gratitude, updated_at)
-         VALUES (?, ?, '', '', '', '', NULL)`
-      ).run(newDayId, role);
-    }
-
-    // carry over open talk items (is_done=0) from old day
-    const openTalk = d.prepare(
-      `SELECT text, created_by, origin_created_at
-       FROM talk_items
-       WHERE day_id=? AND is_done=0
-       ORDER BY origin_created_at ASC, created_at ASC, id ASC`
-    ).all(oldDayId) as Array<{ text: string; created_by: Role; origin_created_at: string }>;
-
-    const ts = nowIso();
-    for (const item of openTalk) {
-      d.prepare(
-        `INSERT INTO talk_items(day_id, text, created_by, created_at, origin_created_at, is_done)
-         VALUES (?, ?, ?, ?, ?, 0)`
-      ).run(newDayId, item.text, item.created_by, ts, item.origin_created_at);
-    }
-
-    return true;
-  });
-
-  tx();
+  d.prepare(`UPDATE talk_items SET done = 1 WHERE id = ?`).run(id);
 }

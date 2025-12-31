@@ -1,21 +1,26 @@
-import { addTalkItem } from "@/lib/db";
-import type { Role } from "@/lib/types";
+import { NextResponse } from "next/server";
+import { addTalk, listOpenTalk } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-function isRole(x: any): x is Role {
-  return x === "mann" || x === "frau";
+function bad(msg: string, status = 400) {
+  return new NextResponse(msg, { status });
+}
+
+export async function GET() {
+  return NextResponse.json({ talk: listOpenTalk() });
 }
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => null);
-  if (!body) return new Response("Invalid JSON", { status: 400 });
+  const body = await req.json().catch(() => null) as any;
+  if (!body) return bad("Invalid JSON", 400);
 
-  const text = String(body.text ?? "");
   const created_by = body.created_by;
+  if (created_by !== "mann" && created_by !== "frau") return bad("Invalid created_by", 400);
 
-  if (!isRole(created_by)) return new Response("Invalid created_by", { status: 400 });
+  const text = String(body.text ?? "").trim();
+  if (!text) return bad("Missing text", 400);
 
-  addTalkItem(text, created_by);
-  return new Response(null, { status: 204 });
+  addTalk(created_by, text);
+  return NextResponse.json({ ok: true });
 }
