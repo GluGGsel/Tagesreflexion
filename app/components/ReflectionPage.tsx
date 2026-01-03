@@ -5,6 +5,7 @@ import TalkList from "./TalkList";
 import { formatGermanDate } from "@/lib/date";
 import type { Role, StateResponse } from "@/lib/types";
 import { normalizeText } from "@/lib/validators";
+import { INSTANCE } from "@/config/instance";
 
 type Props = { role: Role };
 
@@ -73,6 +74,13 @@ function setPageBackdropAndCards(role: Role) {
 export default function ReflectionPage({ role }: Props) {
   const otherRole: Role = role === "mann" ? "frau" : "mann";
 
+  const labels = INSTANCE.labels;
+  const meName = role === "mann" ? labels.mann : labels.frau;
+  const partnerName = role === "mann" ? labels.frau : labels.mann;
+
+  const kind1Label = labels.kind1;
+  const kind2Label = labels.kind2;
+
   const [state, setState] = useState<StateResponse | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [dirty, setDirty] = useState(false);
@@ -82,9 +90,6 @@ export default function ReflectionPage({ role }: Props) {
 
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [themeSource, setThemeSource] = useState<ThemeSource>("system");
-
-  const partnerLabel = useMemo(() => (role === "mann" ? "Frau" : "Mann"), [role]);
-  const meLabel = useMemo(() => (role === "mann" ? "Mann" : "Frau"), [role]);
 
   useEffect(() => setPageBackdropAndCards(role), [role]);
 
@@ -315,7 +320,7 @@ export default function ReflectionPage({ role }: Props) {
 
         <div className="grid">
           <section className="card me">
-            <h2>{meLabel}&apos;s Reflexion</h2>
+            <h2>{meName}&apos;s Reflexion</h2>
 
             <div className="section-title">„Ich bin dankbar für...“</div>
 
@@ -345,7 +350,7 @@ export default function ReflectionPage({ role }: Props) {
               <div className="readonly">{meEntry?.general_2 ?? ""}</div>
             )}
 
-            <div className="section-title">„Betreffend {partnerLabel} bin ich dankbar für...“</div>
+            <div className="section-title">„Betreffend {partnerName} bin ich dankbar für...“</div>
             <label className="label">#3 dankbar</label>
             {isToday ? (
               <textarea
@@ -359,7 +364,7 @@ export default function ReflectionPage({ role }: Props) {
               <div className="readonly">{meEntry?.partner_specific ?? ""}</div>
             )}
 
-            <div className="section-title">„Betreffend Kind1 bin ich dankbar für...“</div>
+            <div className="section-title">„Betreffend {kind1Label} bin ich dankbar für...“</div>
             <label className="label">#4 dankbar</label>
             {isToday ? (
               <textarea
@@ -373,7 +378,7 @@ export default function ReflectionPage({ role }: Props) {
               <div className="readonly">{meEntry?.children1_gratitude ?? ""}</div>
             )}
 
-            <div className="section-title">„Betreffend Kind2 bin ich dankbar für...“</div>
+            <div className="section-title">„Betreffend {kind2Label} bin ich dankbar für...“</div>
             <label className="label">#5 dankbar</label>
             {isToday ? (
               <textarea
@@ -420,7 +425,7 @@ export default function ReflectionPage({ role }: Props) {
           </section>
 
           <section className="card partner">
-            <h2>{partnerLabel}&apos;s Reflexion</h2>
+            <h2>{partnerName}&apos;s Reflexion</h2>
 
             <div className="section-title">„Ich bin dankbar für...“</div>
 
@@ -430,15 +435,15 @@ export default function ReflectionPage({ role }: Props) {
             <label className="label">#2 dankbar</label>
             <div className="readonly">{otherEntry?.general_2 ?? ""}</div>
 
-            <div className="section-title">„Betreffend {meLabel} bin ich dankbar für...“</div>
+            <div className="section-title">„Betreffend {meName} bin ich dankbar für...“</div>
             <label className="label">#3 dankbar</label>
             <div className="readonly">{otherEntry?.partner_specific ?? ""}</div>
 
-            <div className="section-title">„Betreffend Kind1 bin ich dankbar für...“</div>
+            <div className="section-title">„Betreffend {kind1Label} bin ich dankbar für...“</div>
             <label className="label">#4 dankbar</label>
             <div className="readonly">{otherEntry?.children1_gratitude ?? ""}</div>
 
-            <div className="section-title">„Betreffend Kind2 bin ich dankbar für...“</div>
+            <div className="section-title">„Betreffend {kind2Label} bin ich dankbar für...“</div>
             <label className="label">#5 dankbar</label>
             <div className="readonly">{otherEntry?.children2_gratitude ?? ""}</div>
 

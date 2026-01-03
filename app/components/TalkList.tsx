@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { Role, TalkItem } from "@/lib/types";
+import { INSTANCE } from "@/config/instance";
 
 type Props = {
   role: Role;
@@ -9,22 +10,23 @@ type Props = {
   onChanged: () => Promise<void>;
 };
 
-export default function TalkList({ role, talk, onChanged }: Props) {
+export default function TalkList({ talk, onChanged }: Props) {
   const [busyId, setBusyId] = useState<number | null>(null);
+
+  const labels = INSTANCE.labels;
 
   async function markDone(id: number) {
     setBusyId(id);
     try {
       const res = await fetch(`/api/talk/${id}`, { method: "PATCH" });
-      if (!res.ok) {
-        // bewusst minimal: UI oben zeigt Status in ReflectionPage, hier nur still failen
-        return;
-      }
+      if (!res.ok) return;
       await onChanged();
     } finally {
       setBusyId(null);
     }
   }
+
+  const creatorLabel = (r: Role) => (r === "mann" ? labels.mann : labels.frau);
 
   return (
     <div>
@@ -53,8 +55,7 @@ export default function TalkList({ role, talk, onChanged }: Props) {
               </div>
 
               <div className="small" style={{ marginTop: 8 }}>
-                von {t.created_by === "mann" ? "Mann" : "Frau"} · erstellt{" "}
-                {t.created_at ? new Date(t.created_at).toLocaleString("de-DE") : "—"}
+                von {creatorLabel(t.created_by)} · erstellt {t.created_at ? new Date(t.created_at).toLocaleString("de-DE") : "—"}
               </div>
             </div>
           ))}
