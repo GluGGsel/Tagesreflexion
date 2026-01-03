@@ -52,26 +52,22 @@ export function getDb() {
 }
 
 /**
- * Return today's date (YYYY-MM-DD) based on SERVER time.
- * Fixed TZ to Europe/Zurich for deterministic behavior.
+ * Return today's date (YYYY-MM-DD) based on SERVER LOCAL TIME.
+ * This avoids Intl timeZone issues (ICU/Node builds), and matches the requirement:
+ * "serverzeit vom host".
  */
 export function todayISO(): string {
-  const tz = "Europe/Zurich";
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  });
-  return fmt.format(new Date()); // en-CA => YYYY-MM-DD
+  const d = new Date(); // server local time
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 export function isISODate(d: string): boolean {
-  // strict YYYY-MM-DD
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
   const dt = new Date(d + "T00:00:00Z");
   if (Number.isNaN(dt.getTime())) return false;
-  // ensure it didn't roll (e.g., 2025-02-31)
   const [y, m, day] = d.split("-").map(Number);
   const check = new Date(Date.UTC(y, m - 1, day));
   return (
@@ -81,7 +77,6 @@ export function isISODate(d: string): boolean {
   );
 }
 
-/** Ensure a days-row exists for today's date and return its id. */
 export function ensureTodayDayId(): number {
   const d = getDb();
   const date = todayISO();
@@ -93,10 +88,6 @@ export function ensureTodayDayId(): number {
   return Number(info.lastInsertRowid);
 }
 
-/**
- * Return entries for a given date. If the day doesn't exist yet, it does NOT create it.
- * This is important for "history view" so you don't pollute the DB just by browsing.
- */
 export function getEntriesByDate(date: string): {
   day: { id: number | null; date: string };
   entries: { mann: any | null; frau: any | null };
@@ -129,7 +120,6 @@ export function getEntriesByDate(date: string): {
   return { day: { id: dayRow.id, date }, entries: out };
 }
 
-/** Get entries for today keyed by role (and ensure today exists). */
 export function getTodayEntries(): {
   day: { id: number; date: string };
   entries: { mann: any | null; frau: any | null };
