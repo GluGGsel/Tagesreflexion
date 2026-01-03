@@ -53,7 +53,7 @@ export function getDb() {
 
 /**
  * Return today's date (YYYY-MM-DD) based on SERVER time.
- * Uses Europe/Zurich to be deterministic (host should already be set, but iOS users love surprises).
+ * Fixed TZ to Europe/Zurich for deterministic behavior.
  */
 export function todayISO(): string {
   const tz = "Europe/Zurich";
@@ -64,6 +64,21 @@ export function todayISO(): string {
     day: "2-digit"
   });
   return fmt.format(new Date()); // en-CA => YYYY-MM-DD
+}
+
+export function isISODate(d: string): boolean {
+  // strict YYYY-MM-DD
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  const dt = new Date(d + "T00:00:00Z");
+  if (Number.isNaN(dt.getTime())) return false;
+  // ensure it didn't roll (e.g., 2025-02-31)
+  const [y, m, day] = d.split("-").map(Number);
+  const check = new Date(Date.UTC(y, m - 1, day));
+  return (
+    check.getUTCFullYear() === y &&
+    check.getUTCMonth() === m - 1 &&
+    check.getUTCDate() === day
+  );
 }
 
 /** Ensure a days-row exists for today's date and return its id. */
@@ -78,7 +93,43 @@ export function ensureTodayDayId(): number {
   return Number(info.lastInsertRowid);
 }
 
-/** Get entries for today keyed by role. */
+/**
+ * Return entries for a given date. If the day doesn't exist yet, it does NOT create it.
+ * This is important for "history view" so you don't pollute the DB just by browsing.
+ */
+export function getEntriesByDate(date: string): {
+  day: { id: number | null; date: string };
+  entries: { mann: any | null; frau: any | null };
+} {
+  const d = getDb();
+
+  const dayRow = d.prepare(`SELECT id FROM days WHERE date = ?`).get(date) as { id: number } | undefined;
+  if (!dayRow?.id) {
+    return { day: { id: null, date }, entries: { mann: null, frau: null } };
+  }
+
+  const rows = d
+    .prepare(
+      `SELECT role, general_1, general_2, partner_specific, children_gratitude, updated_at
+       FROM entries
+       WHERE day_id = ?`
+    )
+    .all(dayRow.id) as Array<{
+    role: "mann" | "frau";
+    general_1: string;
+    general_2: string;
+    partner_specific: string;
+    children_gratitude: string;
+    updated_at: string;
+  }>;
+
+  const out: { mann: any | null; frau: any | null } = { mann: null, frau: null };
+  for (const r of rows) out[r.role] = r;
+
+  return { day: { id: dayRow.id, date }, entries: out };
+}
+
+/** Get entries for today keyed by role (and ensure today exists). */
 export function getTodayEntries(): {
   day: { id: number; date: string };
   entries: { mann: any | null; frau: any | null };
@@ -108,12 +159,15 @@ export function getTodayEntries(): {
   return { day: { id: dayId, date }, entries: out };
 }
 
-export function upsertEntryForToday(role: "mann" | "frau", payload: {
-  general_1: string;
-  general_2: string;
-  partner_specific: string;
-  children_gratitude: string;
-}) {
+export function upsertEntryForToday(
+  role: "mann" | "frau",
+  payload: {
+    general_1: string;
+    general_2: string;
+    partner_specific: string;
+    children_gratitude: string;
+  }
+) {
   const d = getDb();
   const dayId = ensureTodayDayId();
   const now = new Date().toISOString();

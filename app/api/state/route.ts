@@ -1,16 +1,32 @@
 import { NextResponse } from "next/server";
-import { getTodayEntries, listOpenTalk } from "@/lib/db";
+import { getEntriesByDate, getTodayEntries, isISODate, listOpenTalk, todayISO } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const { day, entries } = getTodayEntries();
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const qDate = url.searchParams.get("date");
+
+  const today = todayISO();
+
+  let day;
+  let entries;
+
+  if (qDate && isISODate(qDate)) {
+    const res = getEntriesByDate(qDate);
+    day = res.day;
+    entries = res.entries;
+  } else {
+    const res = getTodayEntries();
+    day = res.day;
+    entries = res.entries;
+  }
+
   const talk = listOpenTalk();
 
-  // "can_next_day" bleibt im Typ evtl. drin – aber UI nutzt es nicht mehr.
-  // Wir liefern es als true, damit nichts an anderer Stelle knallt.
   return NextResponse.json({
     day,
+    today_date: today,
     entries,
     talk,
     can_next_day: true
