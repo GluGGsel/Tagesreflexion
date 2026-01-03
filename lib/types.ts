@@ -4,7 +4,8 @@ export type Entry = {
   general_1: string;
   general_2: string;
   partner_specific: string;
-  children_gratitude: string;
+  children1_gratitude: string;
+  children2_gratitude: string;
   updated_at: string;
 };
 

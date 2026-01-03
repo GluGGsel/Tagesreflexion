@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import TalkList from "./TalkList";
 import { formatGermanDate } from "@/lib/date";
 import type { Role, StateResponse } from "@/lib/types";
-import { normalizeText, validateRequired4 } from "@/lib/validators";
+import { normalizeText } from "@/lib/validators";
 
 type Props = { role: Role };
 
@@ -12,7 +12,8 @@ type Draft = {
   general_1: string;
   general_2: string;
   partner_specific: string;
-  children_gratitude: string;
+  children1_gratitude: string;
+  children2_gratitude: string;
   talk_input: string;
 };
 
@@ -20,7 +21,8 @@ const EMPTY: Draft = {
   general_1: "",
   general_2: "",
   partner_specific: "",
-  children_gratitude: "",
+  children1_gratitude: "",
+  children2_gratitude: "",
   talk_input: ""
 };
 
@@ -58,7 +60,6 @@ function setPageBackdropAndCards(role: Role) {
   document.body.style.background = bg;
   document.documentElement.style.setProperty("--page-bg", bg);
 
-  // distinct card colors
   const blue = "rgba(59, 130, 246, 0.22)";
   const pink = "rgba(236, 72, 153, 0.20)";
 
@@ -77,21 +78,16 @@ export default function ReflectionPage({ role }: Props) {
   const [dirty, setDirty] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ kind: "ok" | "err" | "info"; text: string } | null>(null);
 
-  // history selector
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
-  // theme
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [themeSource, setThemeSource] = useState<ThemeSource>("system");
 
   const partnerLabel = useMemo(() => (role === "mann" ? "Frau" : "Mann"), [role]);
   const meLabel = useMemo(() => (role === "mann" ? "Mann" : "Frau"), [role]);
 
-  useEffect(() => {
-    setPageBackdropAndCards(role);
-  }, [role]);
+  useEffect(() => setPageBackdropAndCards(role), [role]);
 
-  // Theme init: default = system; only override if user set one
   useEffect(() => {
     const saved = getSavedTheme();
     if (saved) {
@@ -120,8 +116,6 @@ export default function ReflectionPage({ role }: Props) {
     const data = (await res.json()) as StateResponse;
 
     setState(data);
-
-    // initialize selected date to "today" on first load
     if (!selectedDate) setSelectedDate(data.day.date);
 
     if (opts.allowOverwriteMyDraft) {
@@ -131,7 +125,8 @@ export default function ReflectionPage({ role }: Props) {
         general_1: me?.general_1 ?? "",
         general_2: me?.general_2 ?? "",
         partner_specific: me?.partner_specific ?? "",
-        children_gratitude: me?.children_gratitude ?? ""
+        children1_gratitude: me?.children1_gratitude ?? "",
+        children2_gratitude: me?.children2_gratitude ?? ""
       }));
       setDirty(false);
     }
@@ -148,7 +143,6 @@ export default function ReflectionPage({ role }: Props) {
   const effectiveSelectedDate = selectedDate ?? state?.day?.date ?? null;
   const isToday = !!todayDate && !!effectiveSelectedDate && todayDate === effectiveSelectedDate;
 
-  // Polling: nur für "heute"
   useEffect(() => {
     if (!isToday) return;
     const t = setInterval(() => {
@@ -169,39 +163,46 @@ export default function ReflectionPage({ role }: Props) {
     !!otherEntry?.general_1 ||
     !!otherEntry?.general_2 ||
     !!otherEntry?.partner_specific ||
-    !!otherEntry?.children_gratitude;
+    !!otherEntry?.children1_gratitude ||
+    !!otherEntry?.children2_gratitude;
 
   const canAddTalk = normalizeText(draft.talk_input).length > 0;
 
-  const requiredOk = validateRequired4({
-    general_1: draft.general_1,
-    general_2: draft.general_2,
-    partner_specific: draft.partner_specific,
-    children_gratitude: draft.children_gratitude
-  });
+  const requiredOk =
+    normalizeText(draft.general_1).length > 0 &&
+    normalizeText(draft.general_2).length > 0 &&
+    normalizeText(draft.partner_specific).length > 0 &&
+    normalizeText(draft.children1_gratitude).length > 0 &&
+    normalizeText(draft.children2_gratitude).length > 0;
 
   async function saveMine() {
     setStatusMsg({ kind: "info", text: "Speichern…" });
-    const payload = {
-      general_1: draft.general_1,
-      general_2: draft.general_2,
-      partner_specific: draft.partner_specific,
-      children_gratitude: draft.children_gratitude
-    };
+    try {
+      const payload = {
+        general_1: draft.general_1,
+        general_2: draft.general_2,
+        partner_specific: draft.partner_specific,
+        children1_gratitude: draft.children1_gratitude,
+        children2_gratitude: draft.children2_gratitude
+      };
 
-    const res = await fetch(`/api/entries/${role}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+      const res = await fetch(`/api/entries/${role}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
 
-    if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      setStatusMsg({ kind: "err", text: t || "Speichern fehlgeschlagen." });
-      return;
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        setStatusMsg({ kind: "err", text: t || "Speichern fehlgeschlagen." });
+        return;
+      }
+
+      setStatusMsg({ kind: "ok", text: "Gespeichert." });
+      await loadState({ allowOverwriteMyDraft: true, date: effectiveSelectedDate });
+    } catch {
+      setStatusMsg({ kind: "err", text: "Speichern fehlgeschlagen (Netzwerk/Server)." });
     }
-    setStatusMsg({ kind: "ok", text: "Gespeichert." });
-    await loadState({ allowOverwriteMyDraft: true, date: effectiveSelectedDate });
   }
 
   async function addTalkItem() {
@@ -209,21 +210,25 @@ export default function ReflectionPage({ role }: Props) {
     if (!text) return;
 
     setStatusMsg({ kind: "info", text: "Punkt hinzufügen…" });
-    const res = await fetch("/api/talk", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, created_by: role })
-    });
+    try {
+      const res = await fetch("/api/talk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, created_by: role })
+      });
 
-    if (!res.ok) {
-      setStatusMsg({ kind: "err", text: "Konnte Punkt nicht hinzufügen." });
-      return;
+      if (!res.ok) {
+        setStatusMsg({ kind: "err", text: "Konnte Punkt nicht hinzufügen." });
+        return;
+      }
+
+      setDraft((d) => ({ ...d, talk_input: "" }));
+      setDirty(true);
+      setStatusMsg({ kind: "ok", text: "Punkt hinzugefügt." });
+      await loadState({ allowOverwriteMyDraft: false, date: effectiveSelectedDate });
+    } catch {
+      setStatusMsg({ kind: "err", text: "Konnte Punkt nicht hinzufügen (Netzwerk/Server)." });
     }
-
-    setDraft((d) => ({ ...d, talk_input: "" }));
-    setDirty(true);
-    setStatusMsg({ kind: "ok", text: "Punkt hinzugefügt." });
-    await loadState({ allowOverwriteMyDraft: false, date: effectiveSelectedDate });
   }
 
   function toggleThemeSwitch() {
@@ -244,7 +249,6 @@ export default function ReflectionPage({ role }: Props) {
 
   async function onPickDate(d: string) {
     setSelectedDate(d);
-    // History view is read-only; overwrite draft is fine
     await loadState({ allowOverwriteMyDraft: true, date: d });
   }
 
@@ -265,7 +269,6 @@ export default function ReflectionPage({ role }: Props) {
             </div>
 
             <div className="row">
-              {/* Date picker + Heute */}
               <div className="row" style={{ gap: 8 }}>
                 <input
                   type="date"
@@ -286,7 +289,6 @@ export default function ReflectionPage({ role }: Props) {
                 </button>
               </div>
 
-              {/* Theme switch */}
               <div className="theme-switch" data-checked={switchChecked ? "true" : "false"}>
                 <label className="track" title="Nachtmodus umschalten">
                   <input type="checkbox" checked={switchChecked} onChange={toggleThemeSwitch} aria-label="Nachtmodus" />
@@ -306,8 +308,7 @@ export default function ReflectionPage({ role }: Props) {
               {statusMsg?.text ?? ""}
             </span>
 
-            {/* Pflichtfelder Hinweis nur relevant für "heute" (weil nur dann editierbar) */}
-            {isToday && <span className="badge err">#1–#4 dankbar müssen ausgefüllt werden.</span>}
+            {isToday && <span className="badge err">#1–#5 dankbar müssen ausgefüllt werden.</span>}
             {!isToday && <span className="badge">Vergangenheit: nur Ansicht (read-only).</span>}
           </div>
         </div>
@@ -358,18 +359,32 @@ export default function ReflectionPage({ role }: Props) {
               <div className="readonly">{meEntry?.partner_specific ?? ""}</div>
             )}
 
-            <div className="section-title">„Betreffend Kinder bin ich dankbar für...“</div>
+            <div className="section-title">„Betreffend Kind1 bin ich dankbar für...“</div>
             <label className="label">#4 dankbar</label>
             {isToday ? (
               <textarea
-                value={draft.children_gratitude}
+                value={draft.children1_gratitude}
                 onChange={(e) => {
-                  setDraft((d) => ({ ...d, children_gratitude: e.target.value }));
+                  setDraft((d) => ({ ...d, children1_gratitude: e.target.value }));
                   setDirty(true);
                 }}
               />
             ) : (
-              <div className="readonly">{meEntry?.children_gratitude ?? ""}</div>
+              <div className="readonly">{meEntry?.children1_gratitude ?? ""}</div>
+            )}
+
+            <div className="section-title">„Betreffend Kind2 bin ich dankbar für...“</div>
+            <label className="label">#5 dankbar</label>
+            {isToday ? (
+              <textarea
+                value={draft.children2_gratitude}
+                onChange={(e) => {
+                  setDraft((d) => ({ ...d, children2_gratitude: e.target.value }));
+                  setDirty(true);
+                }}
+              />
+            ) : (
+              <div className="readonly">{meEntry?.children2_gratitude ?? ""}</div>
             )}
 
             {isToday && (
@@ -378,7 +393,7 @@ export default function ReflectionPage({ role }: Props) {
                   <button className="btn" onClick={saveMine} disabled={!requiredOk} type="button">
                     Speichern
                   </button>
-                  {!requiredOk && <span className="badge err">#1–#4 dankbar müssen ausgefüllt werden.</span>}
+                  {!requiredOk && <span className="badge err">#1–#5 dankbar müssen ausgefüllt werden.</span>}
                   {dirty && <span className="badge">Ungespeichert</span>}
                 </div>
 
@@ -419,9 +434,13 @@ export default function ReflectionPage({ role }: Props) {
             <label className="label">#3 dankbar</label>
             <div className="readonly">{otherEntry?.partner_specific ?? ""}</div>
 
-            <div className="section-title">„Betreffend Kinder bin ich dankbar für...“</div>
+            <div className="section-title">„Betreffend Kind1 bin ich dankbar für...“</div>
             <label className="label">#4 dankbar</label>
-            <div className="readonly">{otherEntry?.children_gratitude ?? ""}</div>
+            <div className="readonly">{otherEntry?.children1_gratitude ?? ""}</div>
+
+            <div className="section-title">„Betreffend Kind2 bin ich dankbar für...“</div>
+            <label className="label">#5 dankbar</label>
+            <div className="readonly">{otherEntry?.children2_gratitude ?? ""}</div>
 
             {partnerHasAny && isToday && (
               <>
@@ -432,10 +451,13 @@ export default function ReflectionPage({ role }: Props) {
           </section>
         </div>
 
-        {/* TalkList nur für HEUTE */}
         {isToday && (
           <section className="card" style={{ marginTop: 14 }}>
-            <TalkList role={role} talk={state?.talk ?? []} onChanged={async () => loadState({ allowOverwriteMyDraft: false, date: effectiveSelectedDate })} />
+            <TalkList
+              role={role}
+              talk={state?.talk ?? []}
+              onChanged={async () => loadState({ allowOverwriteMyDraft: false, date: effectiveSelectedDate })}
+            />
           </section>
         )}
       </main>

@@ -41,7 +41,6 @@ function migrateDaysTable(d: Database.Database) {
   const cols = tableColumns(d, "days");
   if (cols.includes("date")) return;
 
-  // choose best candidate column to map to "date"
   const info = d.prepare(`PRAGMA table_info(days)`).all() as Array<{ name: string; type: string }>;
   const candidate =
     info.find((c) => c.name !== "id" && (c.type || "").toUpperCase().includes("TEXT"))?.name ||
@@ -81,8 +80,6 @@ function migrateDaysTable(d: Database.Database) {
  * Ensure talk_items exists and has the modern columns:
  * - created_at TEXT NOT NULL
  * - done INTEGER NOT NULL DEFAULT 0
- *
- * Migrates legacy tables by adding missing columns via ALTER TABLE.
  */
 function migrateTalkItems(d: Database.Database) {
   if (!tableExists(d, "talk_items")) {
@@ -100,16 +97,65 @@ function migrateTalkItems(d: Database.Database) {
 
   const cols = tableColumns(d, "talk_items");
 
-  // Add created_at if missing (best-effort)
   if (!cols.includes("created_at")) {
     d.exec(`ALTER TABLE talk_items ADD COLUMN created_at TEXT NOT NULL DEFAULT '' ;`);
-    // Fill empty created_at with "now" for existing rows (deterministic enough)
-    d.exec(`UPDATE talk_items SET created_at = COALESCE(NULLIF(created_at,''), datetime('now')) WHERE created_at = '' OR created_at IS NULL;`);
+    d.exec(
+      `UPDATE talk_items SET created_at = COALESCE(NULLIF(created_at,''), datetime('now')) WHERE created_at = '' OR created_at IS NULL;`
+    );
   }
 
-  // Add done if missing
   if (!cols.includes("done")) {
     d.exec(`ALTER TABLE talk_items ADD COLUMN done INTEGER NOT NULL DEFAULT 0;`);
+  }
+}
+
+/**
+ * Ensure entries exists and supports:
+ * - children1_gratitude TEXT NOT NULL
+ * - children2_gratitude TEXT NOT NULL
+ *
+ * Legacy: children_gratitude TEXT NOT NULL (single field) -> migrate by copying to children1_gratitude
+ */
+function migrateEntries(d: Database.Database) {
+  if (!tableExists(d, "entries")) {
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        day_id INTEGER NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('mann','frau')),
+        general_1 TEXT NOT NULL,
+        general_2 TEXT NOT NULL,
+        partner_specific TEXT NOT NULL,
+        children1_gratitude TEXT NOT NULL,
+        children2_gratitude TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(day_id, role),
+        FOREIGN KEY(day_id) REFERENCES days(id) ON DELETE CASCADE
+      );
+    `);
+    return;
+  }
+
+  const cols = tableColumns(d, "entries");
+
+  // add new columns if missing
+  if (!cols.includes("children1_gratitude")) {
+    d.exec(`ALTER TABLE entries ADD COLUMN children1_gratitude TEXT NOT NULL DEFAULT '';`);
+  }
+  if (!cols.includes("children2_gratitude")) {
+    d.exec(`ALTER TABLE entries ADD COLUMN children2_gratitude TEXT NOT NULL DEFAULT '';`);
+  }
+
+  // If legacy column exists, best-effort copy into children1_gratitude where empty
+  if (cols.includes("children_gratitude")) {
+    d.exec(`
+      UPDATE entries
+      SET children1_gratitude = CASE
+        WHEN TRIM(children1_gratitude) = '' THEN COALESCE(children_gratitude, '')
+        ELSE children1_gratitude
+      END
+      WHERE children_gratitude IS NOT NULL;
+    `);
   }
 }
 
@@ -118,21 +164,7 @@ function initSchema(d: Database.Database) {
 
   migrateDaysTable(d);
 
-  d.exec(`
-    CREATE TABLE IF NOT EXISTS entries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      day_id INTEGER NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('mann','frau')),
-      general_1 TEXT NOT NULL,
-      general_2 TEXT NOT NULL,
-      partner_specific TEXT NOT NULL,
-      children_gratitude TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      UNIQUE(day_id, role),
-      FOREIGN KEY(day_id) REFERENCES days(id) ON DELETE CASCADE
-    );
-  `);
-
+  migrateEntries(d);
   migrateTalkItems(d);
 }
 
@@ -186,7 +218,9 @@ export function getEntriesByDate(date: string): {
 
   const rows = d
     .prepare(
-      `SELECT role, general_1, general_2, partner_specific, children_gratitude, updated_at
+      `SELECT role, general_1, general_2, partner_specific,
+              children1_gratitude, children2_gratitude,
+              updated_at
        FROM entries
        WHERE day_id = ?`
     )
@@ -195,7 +229,8 @@ export function getEntriesByDate(date: string): {
     general_1: string;
     general_2: string;
     partner_specific: string;
-    children_gratitude: string;
+    children1_gratitude: string;
+    children2_gratitude: string;
     updated_at: string;
   }>;
 
@@ -215,7 +250,9 @@ export function getTodayEntries(): {
 
   const rows = d
     .prepare(
-      `SELECT role, general_1, general_2, partner_specific, children_gratitude, updated_at
+      `SELECT role, general_1, general_2, partner_specific,
+              children1_gratitude, children2_gratitude,
+              updated_at
        FROM entries
        WHERE day_id = ?`
     )
@@ -224,7 +261,8 @@ export function getTodayEntries(): {
     general_1: string;
     general_2: string;
     partner_specific: string;
-    children_gratitude: string;
+    children1_gratitude: string;
+    children2_gratitude: string;
     updated_at: string;
   }>;
 
@@ -236,22 +274,40 @@ export function getTodayEntries(): {
 
 export function upsertEntryForToday(
   role: "mann" | "frau",
-  payload: { general_1: string; general_2: string; partner_specific: string; children_gratitude: string }
+  payload: {
+    general_1: string;
+    general_2: string;
+    partner_specific: string;
+    children1_gratitude: string;
+    children2_gratitude: string;
+  }
 ) {
   const d = getDb();
   const dayId = ensureTodayDayId();
   const now = new Date().toISOString();
 
   d.prepare(
-    `INSERT INTO entries(day_id, role, general_1, general_2, partner_specific, children_gratitude, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO entries(day_id, role, general_1, general_2, partner_specific,
+                         children1_gratitude, children2_gratitude,
+                         updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(day_id, role) DO UPDATE SET
        general_1 = excluded.general_1,
        general_2 = excluded.general_2,
        partner_specific = excluded.partner_specific,
-       children_gratitude = excluded.children_gratitude,
+       children1_gratitude = excluded.children1_gratitude,
+       children2_gratitude = excluded.children2_gratitude,
        updated_at = excluded.updated_at`
-  ).run(dayId, role, payload.general_1, payload.general_2, payload.partner_specific, payload.children_gratitude, now);
+  ).run(
+    dayId,
+    role,
+    payload.general_1,
+    payload.general_2,
+    payload.partner_specific,
+    payload.children1_gratitude,
+    payload.children2_gratitude,
+    now
+  );
 }
 
 export function listOpenTalk() {
