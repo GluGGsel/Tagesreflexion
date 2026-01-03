@@ -1,8 +1,8 @@
 export const INSTANCE = {
   labels: {
-    mann: "Mann",
-    frau: "Frau",
-    kind1: "Kind1",
-    kind2: "Kind2",
+    mann: "Emmanuel",
+    frau: "Joy",
+    kind1: "Joshua",
+    kind2: "Elea",
   },
 } as const;
