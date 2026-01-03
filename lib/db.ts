@@ -18,17 +18,14 @@ function tableExists(d: Database.Database, name: string): boolean {
   return !!row?.name;
 }
 
-function tableColumns(d: Database.Database, table: string): Array<{ name: string; type: string }> {
-  const rows = d.prepare(`PRAGMA table_info(${table})`).all() as Array<{
-    name: string;
-    type: string;
-  }>;
-  return rows.map((r) => ({ name: r.name, type: r.type || "" }));
+function tableColumns(d: Database.Database, table: string): string[] {
+  const rows = d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.map((r) => r.name);
 }
 
 /**
- * Migrates legacy schema variants so current code can rely on:
- * days(id INTEGER PK, date TEXT NOT NULL UNIQUE)
+ * Ensure days table exists and has column "date" (TEXT UNIQUE).
+ * Migrates legacy variants where the date column had a different name.
  */
 function migrateDaysTable(d: Database.Database) {
   if (!tableExists(d, "days")) {
@@ -42,18 +39,17 @@ function migrateDaysTable(d: Database.Database) {
   }
 
   const cols = tableColumns(d, "days");
-  const hasDate = cols.some((c) => c.name === "date");
-  if (hasDate) return;
+  if (cols.includes("date")) return;
 
-  // Find best candidate source column to become "date"
+  // choose best candidate column to map to "date"
+  const info = d.prepare(`PRAGMA table_info(days)`).all() as Array<{ name: string; type: string }>;
   const candidate =
-    cols.find((c) => c.name !== "id" && c.type.toUpperCase().includes("TEXT"))?.name ||
-    cols.find((c) => c.name !== "id")?.name ||
+    info.find((c) => c.name !== "id" && (c.type || "").toUpperCase().includes("TEXT"))?.name ||
+    info.find((c) => c.name !== "id")?.name ||
     null;
 
   d.exec("BEGIN IMMEDIATE;");
 
-  // Create new table with correct schema
   d.exec(`
     CREATE TABLE IF NOT EXISTS days_new (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,7 +58,6 @@ function migrateDaysTable(d: Database.Database) {
   `);
 
   if (candidate) {
-    // Copy with best-effort normalization: trim, and if empty, create legacy unique token
     d.exec(`
       INSERT INTO days_new(date)
       SELECT
@@ -73,28 +68,56 @@ function migrateDaysTable(d: Database.Database) {
       FROM days;
     `);
   } else {
-    // No usable columns; generate unique placeholders
-    d.exec(`
-      INSERT INTO days_new(date)
-      SELECT 'legacy-' || id FROM days;
-    `);
+    d.exec(`INSERT INTO days_new(date) SELECT 'legacy-' || id FROM days;`);
   }
 
-  // Replace old table
   d.exec(`DROP TABLE days;`);
   d.exec(`ALTER TABLE days_new RENAME TO days;`);
 
   d.exec("COMMIT;");
 }
 
+/**
+ * Ensure talk_items exists and has the modern columns:
+ * - created_at TEXT NOT NULL
+ * - done INTEGER NOT NULL DEFAULT 0
+ *
+ * Migrates legacy tables by adding missing columns via ALTER TABLE.
+ */
+function migrateTalkItems(d: Database.Database) {
+  if (!tableExists(d, "talk_items")) {
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS talk_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text TEXT NOT NULL,
+        created_by TEXT NOT NULL CHECK(created_by IN ('mann','frau')),
+        created_at TEXT NOT NULL,
+        done INTEGER NOT NULL DEFAULT 0
+      );
+    `);
+    return;
+  }
+
+  const cols = tableColumns(d, "talk_items");
+
+  // Add created_at if missing (best-effort)
+  if (!cols.includes("created_at")) {
+    d.exec(`ALTER TABLE talk_items ADD COLUMN created_at TEXT NOT NULL DEFAULT '' ;`);
+    // Fill empty created_at with "now" for existing rows (deterministic enough)
+    d.exec(`UPDATE talk_items SET created_at = COALESCE(NULLIF(created_at,''), datetime('now')) WHERE created_at = '' OR created_at IS NULL;`);
+  }
+
+  // Add done if missing
+  if (!cols.includes("done")) {
+    d.exec(`ALTER TABLE talk_items ADD COLUMN done INTEGER NOT NULL DEFAULT 0;`);
+  }
+}
+
 function initSchema(d: Database.Database) {
-  // WAL is fine, and harmless if already set
   d.exec(`PRAGMA journal_mode = WAL;`);
 
-  // Migrate/ensure days table has the right column
   migrateDaysTable(d);
 
-  // Ensure the rest exists (no destructive migrations here)
   d.exec(`
     CREATE TABLE IF NOT EXISTS entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,15 +131,9 @@ function initSchema(d: Database.Database) {
       UNIQUE(day_id, role),
       FOREIGN KEY(day_id) REFERENCES days(id) ON DELETE CASCADE
     );
-
-    CREATE TABLE IF NOT EXISTS talk_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      text TEXT NOT NULL,
-      created_by TEXT NOT NULL CHECK(created_by IN ('mann','frau')),
-      created_at TEXT NOT NULL,
-      done INTEGER NOT NULL DEFAULT 0
-    );
   `);
+
+  migrateTalkItems(d);
 }
 
 export function getDb() {
@@ -127,10 +144,7 @@ export function getDb() {
   return db;
 }
 
-/**
- * Today's date (YYYY-MM-DD) based on SERVER LOCAL TIME.
- * This matches the requirement: "serverzeit vom host".
- */
+/** Today's date (YYYY-MM-DD) based on SERVER LOCAL TIME. */
 export function todayISO(): string {
   const d = new Date();
   const y = d.getFullYear();
