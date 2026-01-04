@@ -5,7 +5,7 @@ import TalkList from "./TalkList";
 import { formatGermanDate } from "@/lib/date";
 import type { Role, StateResponse } from "@/lib/types";
 import { normalizeText } from "@/lib/validators";
-import { INSTANCE } from "@/config/instance";
+import { INSTANCE } from "@/config/instance.get";
 
 type Props = { role: Role };
 

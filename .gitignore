@@ -5,3 +5,4 @@ out
 *.log
 data
 .env
+config/instance.local.ts

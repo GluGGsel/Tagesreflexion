@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Role, TalkItem } from "@/lib/types";
-import { INSTANCE } from "@/config/instance";
+import { INSTANCE } from "@/config/instance.get";
 
 type Props = {
   role: Role;
