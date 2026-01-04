@@ -8,19 +8,21 @@ function bad(msg: string, status = 400) {
 }
 
 export async function GET() {
-  return NextResponse.json({ talk: listOpenTalk() });
+  const talk = listOpenTalk();
+  return NextResponse.json({ talk });
 }
 
 export async function POST(req: Request) {
-  const body = await req.json().catch(() => null) as any;
+  const body = (await req.json().catch(() => null)) as any;
   if (!body) return bad("Invalid JSON", 400);
 
-  const created_by = body.created_by;
-  if (created_by !== "mann" && created_by !== "frau") return bad("Invalid created_by", 400);
-
   const text = String(body.text ?? "").trim();
-  if (!text) return bad("Missing text", 400);
+  const created_by = String(body.created_by ?? "").trim();
+
+  if (!text) return bad("Text fehlt.", 400);
+  if (created_by !== "mann" && created_by !== "frau") return bad("created_by muss mann oder frau sein.", 400);
 
   addTalk(created_by, text);
+
   return NextResponse.json({ ok: true });
 }
