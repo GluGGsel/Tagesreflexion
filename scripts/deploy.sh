@@ -2,46 +2,30 @@
 set -euo pipefail
 
 APP_DIR="/opt/tagesreflexion"
-BRANCH_PRIVATE="private"
+BRANCH="main"
 
 echo "== Tagesreflexion Deploy =="
 
 cd "$APP_DIR"
 
-echo "[0/5] Sicherstellen: auf Branch $BRANCH_PRIVATE"
+echo "[0/4] Checkout $BRANCH"
 git fetch origin --prune
-git fetch upstream --prune || true
+git checkout "$BRANCH"
 
-# Branch anlegen falls nicht vorhanden
-if ! git show-ref --verify --quiet "refs/heads/${BRANCH_PRIVATE}"; then
-  git checkout -b "$BRANCH_PRIVATE"
-else
-  git checkout "$BRANCH_PRIVATE"
-fi
+echo "[1/4] Git pull (origin/$BRANCH)"
+git pull --rebase origin "$BRANCH"
 
-echo "[1/5] Private Repo pull (origin/$BRANCH_PRIVATE)"
-git pull --rebase origin "$BRANCH_PRIVATE"
-
-echo "[2/5] Public Updates einarbeiten (upstream/main -> rebase)"
-# upstream kann fehlen, falls nicht konfiguriert
-if git remote | grep -q '^upstream$'; then
-  git fetch upstream --prune
-  git rebase upstream/main
-else
-  echo "WARN: upstream remote fehlt, überspringe Public-Rebase."
-fi
-
-echo "[3/5] Dependencies installieren"
+echo "[2/4] Dependencies installieren"
 if [ -f package-lock.json ]; then
   npm ci
 else
   npm install
 fi
 
-echo "[4/5] Build"
+echo "[3/4] Build"
 npm run build
 
-echo "[5/5] Service Neustart"
+echo "[4/4] Service Neustart"
 systemctl restart tagesreflexion || true
 systemctl status tagesreflexion --no-pager -l || true
 
