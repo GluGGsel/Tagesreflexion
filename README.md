@@ -15,7 +15,7 @@ Bewusst einfach, lokal, ohne Auth – gedacht für den Einsatz im Heimnetz.
 - To talk about (gemeinsam)
   - älteste Einträge oben
   - Ersteller sichtbar
-  - für beide abhakbar, sofort synchron
+  - für beide abhackbar, sofort synchron
   - offene Punkte bleiben bestehen, erledigte verschwinden
 - Read-only Ansicht für vergangene Tage + Heute-Button
 - Auto-Refresh (5 Minuten, ohne Eingaben zu überschreiben)

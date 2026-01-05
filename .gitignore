@@ -6,3 +6,4 @@ out
 data
 .env
 config/instance.local.ts
+README.private.md
