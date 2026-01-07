@@ -5,30 +5,29 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const qDate = url.searchParams.get("date");
+  const dateParam = url.searchParams.get("date");
 
   const today = todayISO();
 
-  let day;
-  let entries;
+  // If no date is provided -> today
+  const requestedDate = dateParam && isISODate(dateParam) ? dateParam : today;
 
-  if (qDate && isISODate(qDate)) {
-    const res = getEntriesByDate(qDate);
-    day = res.day;
-    entries = res.entries;
-  } else {
-    const res = getTodayEntries();
-    day = res.day;
-    entries = res.entries;
-  }
+  // Entries for requested date (today or past)
+  const base =
+    requestedDate === today
+      ? getTodayEntries()
+      : getEntriesByDate(requestedDate);
 
-  const talk = listOpenTalk();
+  // Talk list is global "open items" and should be visible on TODAY only
+  const talk = requestedDate === today ? listOpenTalk() : [];
+
+  const can_next_day = false; // legacy field; kept for compatibility
 
   return NextResponse.json({
-    day,
+    day: base.day,
     today_date: today,
-    entries,
+    entries: base.entries,
     talk,
-    can_next_day: true
+    can_next_day,
   });
 }

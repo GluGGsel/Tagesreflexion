@@ -20,9 +20,13 @@ export async function POST(req: Request) {
   const created_by = String(body.created_by ?? "").trim();
 
   if (!text) return bad("Text fehlt.", 400);
-  if (created_by !== "mann" && created_by !== "frau") return bad("created_by muss mann oder frau sein.", 400);
+  if (created_by !== "mann" && created_by !== "frau") {
+    return bad("created_by muss 'mann' oder 'frau' sein.", 400);
+  }
 
   addTalk(created_by, text);
 
-  return NextResponse.json({ ok: true });
+  // Return the updated list to make UI refresh optional
+  const talk = listOpenTalk();
+  return NextResponse.json({ ok: true, talk });
 }
