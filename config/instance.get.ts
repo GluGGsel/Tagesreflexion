@@ -1,14 +1,24 @@
 import { INSTANCE as BASE } from "./instance";
 
-// Optional local override (not tracked by upstream). If missing, use BASE.
-let LOCAL: typeof BASE | null = null;
+type Instance = typeof BASE;
+
+let LOCAL: Partial<Instance> = {};
 
 try {
+  // IMPORTANT: This file is local-only and must be ignored by git (.gitignore).
+  // Using require inside try/catch keeps it optional without breaking builds.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  // @ts-ignore
-  LOCAL = require("./instance.local").INSTANCE ?? null;
+  LOCAL = require("./instance.local").INSTANCE ?? {};
 } catch {
-  LOCAL = null;
+  LOCAL = {};
 }
 
-export const INSTANCE = (LOCAL ?? BASE) as typeof BASE;
+// Merge base + local; labels are merged deeply.
+export const INSTANCE: Instance = {
+  ...BASE,
+  ...LOCAL,
+  labels: {
+    ...BASE.labels,
+    ...(LOCAL.labels ?? {}),
+  },
+} as const;
