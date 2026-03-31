@@ -28,7 +28,6 @@ type StateResponse = {
   today_date: string;
   entries: Entries;
   talk: TalkItem[];
-  can_next_day: boolean;
 };
 
 function isISODate(s: string) {

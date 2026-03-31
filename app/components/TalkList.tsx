@@ -1,7 +1,5 @@
 "use client";
 
-
-import { INSTANCE } from "@/config/instance.get";
 import React from "react";
 
 export type TalkItem = {

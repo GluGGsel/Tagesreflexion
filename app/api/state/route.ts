@@ -21,13 +21,10 @@ export async function GET(req: Request) {
   // Talk list is global "open items" and should be visible on TODAY only
   const talk = requestedDate === today ? listOpenTalk() : [];
 
-  const can_next_day = false; // legacy field; kept for compatibility
-
   return NextResponse.json({
     day: base.day,
     today_date: today,
     entries: base.entries,
     talk,
-    can_next_day,
   });
 }

@@ -7,10 +7,6 @@ function bad(msg: string, status = 400) {
   return new NextResponse(msg, { status });
 }
 
-export async function GET() {
-  return NextResponse.json({ talk: listOpenTalk() });
-}
-
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => null)) as any;
   if (!body) return bad("Invalid JSON", 400);
